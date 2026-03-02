@@ -91,12 +91,9 @@ export function registerCreativeTools(server: McpServer): void {
       const body: Record<string, string | number | boolean> = { name };
 
       if (source_instagram_media_id) {
-        // Promote an existing Instagram post
+        // Promote an existing Instagram post — NO object_story_spec
         body.source_instagram_media_id = source_instagram_media_id;
-        body.object_story_spec = JSON.stringify({
-          page_id,
-          ...(instagram_actor_id ? { instagram_actor_id } : {}),
-        });
+        if (instagram_actor_id) body.instagram_actor_id = instagram_actor_id;
       } else {
         // Build object_story_spec for link/video ads
         const linkData: Record<string, unknown> = {};
