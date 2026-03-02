@@ -142,9 +142,9 @@ export function registerCreativeTools(server: McpServer): void {
           if (image_hash) videoData.image_hash = image_hash;
           if (image_url && !image_hash) videoData.image_url = image_url;
           if (headline) videoData.title = headline;
-          if (call_to_action_type) {
+          if (call_to_action_type || link_url) {
             videoData.call_to_action = {
-              type: call_to_action_type,
+              type: call_to_action_type ?? "LEARN_MORE",
               value: link_url ? { link: link_url } : undefined,
             };
           }
