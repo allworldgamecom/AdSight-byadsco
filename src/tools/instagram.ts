@@ -46,7 +46,7 @@ export function registerInstagramTools(server: McpServer): void {
         content: [
           {
             type: "text",
-            text: `Instagram Business Account found!\nID: ${ig.id}\nUsername: ${ig.username ?? "N/A"}\nName: ${ig.name ?? "N/A"}\nFollowers: ${ig.followers_count ?? "N/A"}\nMedia count: ${ig.media_count ?? "N/A"}\n\nUse this ID (${ig.id}) as instagram_actor_id when creating creatives, or to fetch Instagram media.`,
+            text: `Instagram Business Account found!\nID: ${ig.id}\nUsername: ${ig.username ?? "N/A"}\nName: ${ig.name ?? "N/A"}\nFollowers: ${ig.followers_count ?? "N/A"}\nMedia count: ${ig.media_count ?? "N/A"}\n\nUse this ID (${ig.id}) as the instagram_actor_id parameter when creating creatives. The MCP maps it to the correct API field automatically (instagram_actor_id inside object_story_spec, instagram_user_id at top-level for source_instagram_media_id / object_story_id modes).`,
           },
           { type: "text", text: JSON.stringify(ig, null, 2) },
         ],
@@ -78,7 +78,7 @@ export function registerInstagramTools(server: McpServer): void {
           : media
               .map(
                 (m) =>
-                  `• ${m.id} — ${m.media_type ?? "UNKNOWN"} — ${m.caption ? m.caption.substring(0, 80) + (m.caption.length > 80 ? "..." : "") : "No caption"} — ${m.timestamp ?? ""}`,
+                  `• ${m.id} — ${m.media_type ?? "UNKNOWN"}${m.boost_eligibility_info ? ` — Boost: ${m.boost_eligibility_info.eligible_to_boost ? "✅ Eligible" : `❌ ${m.boost_eligibility_info.reason ?? "Not eligible"}`}` : ""} — ${m.caption ? m.caption.substring(0, 80) + (m.caption.length > 80 ? "..." : "") : "No caption"} — ${m.timestamp ?? ""}`,
               )
               .join("\n");
 

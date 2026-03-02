@@ -39,39 +39,91 @@ const bidStrategyEnum = z.enum([
   "LOWEST_COST_WITH_MIN_ROAS",
 ]);
 
+const geoLocationSchema = z.object({
+  countries: z.array(z.string()).optional(),
+  regions: z.array(z.object({ key: z.string() })).optional(),
+  cities: z
+    .array(
+      z.object({
+        key: z.string(),
+        radius: z.number().optional(),
+        distance_unit: z.string().optional(),
+      }),
+    )
+    .optional(),
+  zips: z.array(z.object({ key: z.string() })).optional(),
+  location_types: z.array(z.string()).optional(),
+}).passthrough();
+
+const idNameArray = z.array(z.object({ id: z.string(), name: z.string().optional() })).optional();
+
 const targetingSchema = z
   .object({
-    geo_locations: z
-      .object({
-        countries: z.array(z.string()).optional(),
-        regions: z.array(z.object({ key: z.string() })).optional(),
-        cities: z
-          .array(
-            z.object({
-              key: z.string(),
-              radius: z.number().optional(),
-              distance_unit: z.string().optional(),
-            }),
-          )
-          .optional(),
-        zips: z.array(z.object({ key: z.string() })).optional(),
-        location_types: z.array(z.string()).optional(),
-      })
-      .optional(),
+    // Geographic targeting
+    geo_locations: geoLocationSchema.optional(),
+    excluded_geo_locations: geoLocationSchema.optional().describe("Locations to exclude from targeting"),
+
+    // Demographics
     age_min: z.number().min(13).max(65).optional(),
     age_max: z.number().min(13).max(65).optional(),
     genders: z.array(z.number().min(0).max(2)).optional().describe("0=all, 1=male, 2=female"),
-    interests: z.array(z.object({ id: z.string(), name: z.string().optional() })).optional(),
-    behaviors: z.array(z.object({ id: z.string(), name: z.string().optional() })).optional(),
+    locales: z.array(z.number()).optional().describe("Locale IDs for language targeting (e.g., 6=English, 24=Spanish)"),
+    relationship_statuses: z.array(z.number()).optional().describe("1=single, 2=in_relationship, 3=married, 4=engaged, 6=unspecified"),
+
+    // Interests & behaviors
+    interests: idNameArray,
+    behaviors: idNameArray,
+
+    // Education & work
+    education_statuses: z.array(z.number()).optional().describe("1=HIGH_SCHOOL, 2=UNDERGRAD, 3=ALUM, 7=IN_GRAD_SCHOOL, 9=MASTER_DEGREE, etc."),
+    education_schools: idNameArray,
+    education_majors: idNameArray,
+    college_years: z.array(z.number()).optional(),
+    work_employers: idNameArray,
+    work_positions: idNameArray,
+
+    // Life events, income, family, industries
+    life_events: idNameArray,
+    industries: idNameArray,
+    income: idNameArray,
+    family_statuses: idNameArray,
+    user_adclusters: idNameArray.describe("Broad category targeting clusters"),
+
+    // Custom audiences
     custom_audiences: z.array(z.object({ id: z.string() })).optional(),
     excluded_custom_audiences: z.array(z.object({ id: z.string() })).optional(),
-    publisher_platforms: z.array(z.string()).optional(),
-    facebook_positions: z.array(z.string()).optional(),
-    instagram_positions: z.array(z.string()).optional(),
-    device_platforms: z.array(z.string()).optional(),
-    flexible_spec: z.array(z.record(z.unknown())).optional(),
+
+    // Device targeting
+    device_platforms: z.array(z.string()).optional().describe("mobile, desktop"),
+    user_os: z.array(z.string()).optional().describe("OS targeting: iOS, Android, or versioned like iOS_ver_15.0_and_above"),
+    user_device: z.array(z.string()).optional().describe("Target specific devices (e.g., Galaxy S24, iPhone 15)"),
+    excluded_user_device: z.array(z.string()).optional(),
+    wireless_carrier: z.array(z.string()).optional().describe("Carrier targeting (use 'Wifi' for wifi-only users)"),
+
+    // Publisher platforms & placement positions
+    publisher_platforms: z.array(z.string()).optional().describe("facebook, instagram, threads, messenger, audience_network"),
+    facebook_positions: z.array(z.string()).optional().describe("feed, right_hand_column, marketplace, video_feeds, story, search, instream_video, facebook_reels, facebook_reels_overlay, profile_feed, notification"),
+    instagram_positions: z.array(z.string()).optional().describe("stream, story, explore, explore_home, reels, profile_feed, ig_search, profile_reels"),
+    threads_positions: z.array(z.string()).optional().describe("threads_stream (requires instagram stream)"),
+    audience_network_positions: z.array(z.string()).optional().describe("classic, rewarded_video"),
+    messenger_positions: z.array(z.string()).optional().describe("sponsored_messages, story"),
+    whatsapp_positions: z.array(z.string()).optional().describe("status (requires instagram story)"),
+
+    // Brand safety
+    brand_safety_content_filter_levels: z.array(z.string()).optional().describe("FACEBOOK_RELAXED/STANDARD/STRICT, AN_RELAXED/STANDARD/STRICT, FEED_RELAXED/STANDARD/STRICT"),
+    excluded_publisher_categories: z.array(z.string()).optional().describe("dating, gambling, debated_social_issues, mature_audiences, tragedy_and_conflict"),
+    excluded_publisher_list_ids: z.array(z.string()).optional().describe("Block list IDs to exclude specific publishers"),
+
+    // Flexible targeting (AND/OR logic)
+    flexible_spec: z.array(z.record(z.unknown())).optional().describe("Array of targeting groups combined with AND; items within each group use OR"),
     exclusions: z.record(z.unknown()).optional(),
+
+    // Advantage+ audience automation
+    targeting_automation: z.object({
+      advantage_audience: z.number().optional().describe("1 to enable Advantage+ audience"),
+    }).passthrough().optional().describe("Advantage+ audience automation settings"),
   })
+  .passthrough()
   .describe("Targeting specification for the ad set");
 
 export function registerAdSetTools(server: McpServer): void {

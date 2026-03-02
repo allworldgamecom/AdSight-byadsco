@@ -10,6 +10,11 @@ import type {
   MetaApiResponse,
 } from "../meta/types/index.js";
 
+interface TargetingSentenceLine {
+  content: string;
+  children?: string[];
+}
+
 const demographicClassEnum = z.enum([
   "demographics", "work_employers", "work_positions",
   "education_schools", "education_majors", "family_statuses",
@@ -250,6 +255,60 @@ export function registerTargetingTools(server: McpServer): void {
             text: `Estimated Audience Size: ${estimate.users_lower_bound.toLocaleString()} - ${estimate.users_upper_bound.toLocaleString()} people`,
           },
           { type: "text", text: JSON.stringify(estimate, null, 2) },
+        ],
+      };
+    },
+  );
+
+  // ─── Get Targeting Description ──────────────────────────────
+  server.tool(
+    "meta_ads_get_targeting_description",
+    "Get a human-readable description of an ad's targeting specification. Can also preview what a targeting_spec would describe before creating an ad set.",
+    {
+      ad_id: z.string().optional().describe("Ad ID to get targeting description for"),
+      account_id: z.string().optional().describe("Ad account ID (required when using targeting_spec)"),
+      targeting_spec: z
+        .record(z.unknown())
+        .optional()
+        .describe("Targeting spec to preview (same format as create_adset targeting). Requires account_id."),
+    },
+    async ({ ad_id, account_id, targeting_spec }) => {
+      let path: string;
+      const params: Record<string, string | number | boolean> = {};
+
+      if (ad_id) {
+        path = `/${ad_id}/targetingsentencelines`;
+      } else if (account_id && targeting_spec) {
+        const id = normalizeAccountId(account_id);
+        path = `/${id}/targetingsentencelines`;
+        params.targeting_spec = JSON.stringify(targeting_spec);
+      } else {
+        throw new Error("Provide either ad_id, or account_id + targeting_spec.");
+      }
+
+      const response = await metaApiClient.get<{
+        targetingsentencelines?: TargetingSentenceLine[];
+      }>(path, params);
+
+      const lines = response.targetingsentencelines ?? [];
+
+      if (lines.length === 0) {
+        return {
+          content: [{ type: "text", text: "No targeting description available." }],
+        };
+      }
+
+      const text = lines
+        .map((line) => {
+          const children = line.children?.join(", ") ?? "";
+          return `• ${line.content}${children ? ` ${children}` : ""}`;
+        })
+        .join("\n");
+
+      return {
+        content: [
+          { type: "text", text: `Targeting Description:\n\n${text}` },
+          { type: "text", text: JSON.stringify(response, null, 2) },
         ],
       };
     },

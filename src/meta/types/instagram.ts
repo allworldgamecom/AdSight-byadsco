@@ -16,6 +16,11 @@ export const INSTAGRAM_ACCOUNT_FIELDS = [
   "media_count",
 ] as const;
 
+export interface BoostEligibilityInfo {
+  eligible_to_boost?: boolean;
+  reason?: string;
+}
+
 export interface InstagramMedia {
   id: string;
   caption?: string;
@@ -24,6 +29,7 @@ export interface InstagramMedia {
   thumbnail_url?: string;
   timestamp?: string;
   permalink?: string;
+  boost_eligibility_info?: BoostEligibilityInfo;
 }
 
 export const INSTAGRAM_MEDIA_DEFAULT_FIELDS = [
@@ -34,4 +40,5 @@ export const INSTAGRAM_MEDIA_DEFAULT_FIELDS = [
   "thumbnail_url",
   "timestamp",
   "permalink",
+  "boost_eligibility_info",
 ] as const;

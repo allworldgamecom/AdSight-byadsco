@@ -70,21 +70,73 @@ export interface GeoLocation {
 }
 
 export interface TargetingSpec {
+  // Geographic
   geo_locations?: GeoLocation;
   excluded_geo_locations?: GeoLocation;
+
+  // Demographics
   age_min?: number;
   age_max?: number;
   genders?: number[];
+  locales?: number[];
+  relationship_statuses?: number[];
+
+  // Interests & behaviors
   interests?: Array<{ id: string; name?: string }>;
   behaviors?: Array<{ id: string; name?: string }>;
+
+  // Education & work
+  education_statuses?: number[];
+  education_schools?: Array<{ id: string; name?: string }>;
+  education_majors?: Array<{ id: string; name?: string }>;
+  college_years?: number[];
+  work_employers?: Array<{ id: string; name?: string }>;
+  work_positions?: Array<{ id: string; name?: string }>;
+
+  // Life events, income, family, industries, broad categories
+  life_events?: Array<{ id: string; name?: string }>;
+  industries?: Array<{ id: string; name?: string }>;
+  income?: Array<{ id: string; name?: string }>;
+  family_statuses?: Array<{ id: string; name?: string }>;
+  user_adclusters?: Array<{ id: string; name?: string }>;
+
+  // Custom audiences
   custom_audiences?: Array<{ id: string }>;
   excluded_custom_audiences?: Array<{ id: string }>;
+
+  // Device targeting
+  device_platforms?: string[];
+  user_os?: string[];
+  user_device?: string[];
+  excluded_user_device?: string[];
+  wireless_carrier?: string[];
+
+  // Publisher platforms & placement positions
   publisher_platforms?: string[];
   facebook_positions?: string[];
   instagram_positions?: string[];
-  device_platforms?: string[];
+  threads_positions?: string[];
+  audience_network_positions?: string[];
+  messenger_positions?: string[];
+  whatsapp_positions?: string[];
+
+  // Brand safety
+  brand_safety_content_filter_levels?: string[];
+  excluded_publisher_categories?: string[];
+  excluded_publisher_list_ids?: string[];
+
+  // Flexible targeting & exclusions
   flexible_spec?: Array<Record<string, unknown>>;
   exclusions?: Record<string, unknown>;
+
+  // Advantage+ audience automation
+  targeting_automation?: {
+    advantage_audience?: number;
+    [key: string]: unknown;
+  };
+
+  // Allow additional fields from the API
+  [key: string]: unknown;
 }
 
 export interface FrequencyControlSpec {

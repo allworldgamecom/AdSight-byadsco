@@ -5,20 +5,41 @@ import { normalizeAccountId } from "../utils/format.js";
 import type { MetaApiResponse } from "../meta/types/index.js";
 
 const adFormatEnum = z.enum([
+  // Core placements
   "DESKTOP_FEED_STANDARD",
   "MOBILE_FEED_STANDARD",
   "MOBILE_FEED_BASIC",
   "MOBILE_INTERSTITIAL",
   "MOBILE_BANNER",
+  "RIGHT_COLUMN_STANDARD",
+  "MARKETPLACE_MOBILE",
+  // Instagram
   "INSTAGRAM_STANDARD",
   "INSTAGRAM_STORY",
   "INSTAGRAM_REELS",
-  "RIGHT_COLUMN_STANDARD",
-  "MARKETPLACE_MOBILE",
-  "AUDIENCE_NETWORK_OUTSTREAM_VIDEO",
-  "MESSENGER_MOBILE_INBOX_MEDIA",
+  "INSTAGRAM_EXPLORE_CONTEXTUAL",
+  "INSTAGRAM_EXPLORE_GRID_HOME",
+  "INSTAGRAM_REELS_OVERLAY",
+  "INSTAGRAM_PROFILE_FEED",
+  "INSTAGRAM_PROFILE_REELS",
+  "INSTAGRAM_SEARCH_CHAIN",
+  "INSTAGRAM_FEED_WEB",
+  // Facebook Stories & Reels
   "FACEBOOK_STORY_MOBILE",
+  "FACEBOOK_STORY_STICKER_MOBILE",
   "FACEBOOK_REELS_MOBILE",
+  "FACEBOOK_REELS_BANNER",
+  "FACEBOOK_REELS_POSTLOOP",
+  "FACEBOOK_REELS_STICKER",
+  // Messenger & WhatsApp
+  "MESSENGER_MOBILE_INBOX_MEDIA",
+  "MESSENGER_MOBILE_STORY_MEDIA",
+  "WHATSAPP_STATUS_MEDIA",
+  // In-stream & Audience Network
+  "AUDIENCE_NETWORK_OUTSTREAM_VIDEO",
+  "INSTREAM_VIDEO_DESKTOP",
+  "INSTREAM_VIDEO_MOBILE",
+  "SUGGESTED_VIDEO_MOBILE",
 ]);
 
 interface AdPreview {
@@ -102,7 +123,7 @@ export function registerPreviewTools(server: McpServer): void {
                   video_id: z.string().optional(),
                   image_hash: z.string().optional(),
                   message: z.string().optional(),
-                  name: z.string().optional(),
+                  title: z.string().optional().describe("Video headline"),
                   description: z.string().optional(),
                   call_to_action: z
                     .object({
