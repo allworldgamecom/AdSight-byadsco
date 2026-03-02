@@ -8,6 +8,18 @@ import type { AdSet, MetaApiResponse } from "../meta/types/index.js";
 
 const statusEnum = z.enum(["ACTIVE", "PAUSED", "DELETED", "ARCHIVED"]);
 
+const destinationTypeEnum = z.enum([
+  "WEBSITE", "APP", "MESSENGER", "WHATSAPP", "INSTAGRAM_DIRECT",
+  "ON_AD", "ON_POST", "ON_PAGE", "ON_EVENT", "ON_VIDEO",
+  "SHOP_AUTOMATIC", "FACEBOOK", "FACEBOOK_PAGE", "INSTAGRAM_PROFILE",
+  "INSTAGRAM_PROFILE_AND_FACEBOOK_PAGE",
+  "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+  "MESSAGING_INSTAGRAM_DIRECT_MESSENGER_WHATSAPP",
+  "MESSAGING_INSTAGRAM_DIRECT_WHATSAPP",
+  "MESSAGING_MESSENGER_WHATSAPP",
+  "APPLINKS_AUTOMATIC",
+]);
+
 const optimizationGoalEnum = z.enum([
   "NONE", "APP_INSTALLS", "AD_RECALL_LIFT", "ENGAGED_USERS",
   "EVENT_RESPONSES", "IMPRESSIONS", "LEAD_GENERATION", "QUALITY_LEAD",
@@ -139,11 +151,12 @@ export function registerAdSetTools(server: McpServer): void {
   // ─── Create Ad Set ───────────────────────────────────────────
   server.tool(
     "meta_ads_create_adset",
-    "Create a new ad set within a campaign. Requires targeting specification, optimization goal, and budget. Ad sets are created in PAUSED status by default.",
+    "Create a new ad set within a campaign. Requires targeting specification, optimization goal, budget, and destination_type (required for ODAX campaigns). Common destination_type values: WEBSITE (traffic/sales to website), APP (app installs), MESSENGER/WHATSAPP/INSTAGRAM_DIRECT (messaging), ON_AD (lead forms, instant experiences). Ad sets are created in PAUSED status by default.",
     {
       account_id: z.string().describe("Ad account ID"),
       campaign_id: z.string().describe("Parent campaign ID"),
       name: z.string().min(1).describe("Ad set name"),
+      destination_type: destinationTypeEnum.describe("Where the ad traffic is directed. Required for ODAX campaigns. Common values: WEBSITE (website traffic/conversions), APP (app installs), MESSENGER (Messenger conversations), WHATSAPP (WhatsApp conversations), INSTAGRAM_DIRECT (Instagram DMs), ON_AD (lead forms, instant experiences), ON_POST (post engagement), ON_VIDEO (video views), SHOP_AUTOMATIC (shop)"),
       status: z.enum(["ACTIVE", "PAUSED"]).default("PAUSED"),
       daily_budget: z.number().optional().describe("Daily budget in cents (e.g., 2000 = $20.00)"),
       lifetime_budget: z.number().optional().describe("Lifetime budget in cents"),
@@ -157,7 +170,7 @@ export function registerAdSetTools(server: McpServer): void {
       promoted_object: z.record(z.unknown()).optional().describe("Promoted object (e.g., { page_id: '123' } or { pixel_id: '456', custom_event_type: 'PURCHASE' })"),
     },
     async ({
-      account_id, campaign_id, name, status, daily_budget, lifetime_budget,
+      account_id, campaign_id, name, destination_type, status, daily_budget, lifetime_budget,
       optimization_goal, billing_event, bid_amount, bid_strategy, targeting,
       start_time, end_time, promoted_object,
     }) => {
@@ -166,6 +179,7 @@ export function registerAdSetTools(server: McpServer): void {
       const body: Record<string, string | number | boolean> = {
         campaign_id,
         name,
+        destination_type,
         status,
         optimization_goal,
         billing_event,
@@ -196,11 +210,12 @@ export function registerAdSetTools(server: McpServer): void {
   // ─── Update Ad Set ───────────────────────────────────────────
   server.tool(
     "meta_ads_update_adset",
-    "Update an existing ad set's name, status, budget, targeting, or bid settings.",
+    "Update an existing ad set's name, status, budget, targeting, destination_type, or bid settings.",
     {
       adset_id: z.string().describe("Ad set ID to update"),
       name: z.string().optional(),
       status: statusEnum.optional(),
+      destination_type: destinationTypeEnum.optional().describe("Where the ad traffic is directed (e.g., WEBSITE, APP, MESSENGER, ON_AD)"),
       daily_budget: z.number().optional().describe("Daily budget in cents"),
       lifetime_budget: z.number().optional(),
       targeting: targetingSchema.optional(),
@@ -208,10 +223,11 @@ export function registerAdSetTools(server: McpServer): void {
       bid_strategy: bidStrategyEnum.optional(),
       end_time: z.string().optional(),
     },
-    async ({ adset_id, name, status, daily_budget, lifetime_budget, targeting, bid_amount, bid_strategy, end_time }) => {
+    async ({ adset_id, name, status, destination_type, daily_budget, lifetime_budget, targeting, bid_amount, bid_strategy, end_time }) => {
       const body: Record<string, string | number | boolean> = {};
       if (name !== undefined) body.name = name;
       if (status !== undefined) body.status = status;
+      if (destination_type !== undefined) body.destination_type = destination_type;
       if (daily_budget !== undefined) body.daily_budget = String(daily_budget);
       if (lifetime_budget !== undefined) body.lifetime_budget = String(lifetime_budget);
       if (targeting !== undefined) body.targeting = JSON.stringify(targeting);

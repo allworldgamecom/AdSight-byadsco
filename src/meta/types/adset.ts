@@ -2,6 +2,28 @@ import type { BidStrategy } from "./campaign.js";
 
 export type AdSetStatus = "ACTIVE" | "PAUSED" | "DELETED" | "ARCHIVED";
 
+export type DestinationType =
+  | "WEBSITE"
+  | "APP"
+  | "MESSENGER"
+  | "WHATSAPP"
+  | "INSTAGRAM_DIRECT"
+  | "ON_AD"
+  | "ON_POST"
+  | "ON_PAGE"
+  | "ON_EVENT"
+  | "ON_VIDEO"
+  | "SHOP_AUTOMATIC"
+  | "FACEBOOK"
+  | "FACEBOOK_PAGE"
+  | "INSTAGRAM_PROFILE"
+  | "INSTAGRAM_PROFILE_AND_FACEBOOK_PAGE"
+  | "MESSAGING_INSTAGRAM_DIRECT_MESSENGER"
+  | "MESSAGING_INSTAGRAM_DIRECT_MESSENGER_WHATSAPP"
+  | "MESSAGING_INSTAGRAM_DIRECT_WHATSAPP"
+  | "MESSAGING_MESSENGER_WHATSAPP"
+  | "APPLINKS_AUTOMATIC";
+
 export type OptimizationGoal =
   | "NONE"
   | "APP_INSTALLS"
@@ -92,7 +114,7 @@ export interface AdSet {
   updated_time: string;
   frequency_control_specs?: FrequencyControlSpec[];
   promoted_object?: Record<string, unknown>;
-  destination_type?: string;
+  destination_type?: DestinationType;
 }
 
 export const ADSET_DEFAULT_FIELDS = [
@@ -113,4 +135,5 @@ export const ADSET_DEFAULT_FIELDS = [
   "end_time",
   "created_time",
   "updated_time",
+  "destination_type",
 ] as const;
