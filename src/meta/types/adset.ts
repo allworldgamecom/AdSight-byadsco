@@ -9,7 +9,6 @@ export type DestinationType =
   | "WHATSAPP"
   | "INSTAGRAM_DIRECT"
   | "ON_AD"
-  | "ON_POST"
   | "ON_PAGE"
   | "ON_EVENT"
   | "ON_VIDEO"

@@ -10,7 +10,7 @@ const statusEnum = z.enum(["ACTIVE", "PAUSED", "DELETED", "ARCHIVED"]);
 
 const destinationTypeEnum = z.enum([
   "WEBSITE", "APP", "MESSENGER", "WHATSAPP", "INSTAGRAM_DIRECT",
-  "ON_AD", "ON_POST", "ON_PAGE", "ON_EVENT", "ON_VIDEO",
+  "ON_AD", "ON_PAGE", "ON_EVENT", "ON_VIDEO",
   "SHOP_AUTOMATIC", "FACEBOOK", "FACEBOOK_PAGE", "INSTAGRAM_PROFILE",
   "INSTAGRAM_PROFILE_AND_FACEBOOK_PAGE",
   "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
@@ -156,7 +156,7 @@ export function registerAdSetTools(server: McpServer): void {
       account_id: z.string().describe("Ad account ID"),
       campaign_id: z.string().describe("Parent campaign ID"),
       name: z.string().min(1).describe("Ad set name"),
-      destination_type: destinationTypeEnum.describe("Where the ad traffic is directed. Required for ODAX campaigns. Common values: WEBSITE (website traffic/conversions), APP (app installs), MESSENGER (Messenger conversations), WHATSAPP (WhatsApp conversations), INSTAGRAM_DIRECT (Instagram DMs), ON_AD (lead forms, instant experiences), ON_POST (post engagement), ON_VIDEO (video views), SHOP_AUTOMATIC (shop)"),
+      destination_type: destinationTypeEnum.describe("Where the ad traffic is directed. Required for ODAX campaigns. Common values: WEBSITE (website traffic/conversions), APP (app installs), MESSENGER (Messenger conversations), WHATSAPP (WhatsApp conversations), INSTAGRAM_DIRECT (Instagram DMs), ON_AD (lead forms, instant experiences, post engagement), ON_VIDEO (video views), ON_PAGE (page engagement), SHOP_AUTOMATIC (shop)"),
       status: z.enum(["ACTIVE", "PAUSED"]).default("PAUSED"),
       daily_budget: z.number().optional().describe("Daily budget in cents (e.g., 2000 = $20.00)"),
       lifetime_budget: z.number().optional().describe("Lifetime budget in cents"),

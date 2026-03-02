@@ -10,7 +10,14 @@ import { logger } from "../utils/logger.js";
 export function mapMetaErrorToMcp(error: MetaApiError): McpError {
   logger.debug({ metaError: error }, "Mapping Meta API error to MCP error");
 
-  const { code, error_subcode, message } = error;
+  const { code, error_subcode, message, error_user_title, error_user_msg } = error;
+
+  // Build a detail suffix from Meta's user-facing messages when available
+  const metaDetails = [
+    error_user_title ? `[${error_user_title}]` : "",
+    error_user_msg || "",
+  ].filter(Boolean).join(" ");
+  const detailSuffix = metaDetails ? ` — ${metaDetails}` : "";
 
   // Auth errors (invalid/expired token, insufficient permissions)
   if (code === 190 || code === 102 || code === 10) {
@@ -20,7 +27,7 @@ export function mapMetaErrorToMcp(error: MetaApiError): McpError {
         : code === 10
           ? "Insufficient permissions for this operation."
           : "Authentication required.";
-    return new McpError(ErrorCode.InvalidRequest, `${detail} (Meta: ${message})`);
+    return new McpError(ErrorCode.InvalidRequest, `${detail} (Meta: ${message})${detailSuffix}`);
   }
 
   // Rate limiting
@@ -36,7 +43,7 @@ export function mapMetaErrorToMcp(error: MetaApiError): McpError {
     // Subcode 33 = too many ids, subcode 2804008 = invalid targeting spec
     return new McpError(
       ErrorCode.InvalidParams,
-      `Invalid parameter: ${message}${error_subcode ? ` (subcode: ${error_subcode})` : ""}`,
+      `Invalid parameter: ${message}${error_subcode ? ` (subcode: ${error_subcode})` : ""}${detailSuffix}`,
     );
   }
 
@@ -61,7 +68,7 @@ export function mapMetaErrorToMcp(error: MetaApiError): McpError {
   // Default fallback
   return new McpError(
     ErrorCode.InternalError,
-    `Meta API error (code ${code}): ${message}`,
+    `Meta API error (code ${code}): ${message}${detailSuffix}`,
   );
 }
 

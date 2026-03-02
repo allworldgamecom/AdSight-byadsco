@@ -5,7 +5,7 @@ import { isMetaApiError, mapMetaErrorToMcp } from "./errors.js";
 import type { MetaApiResponse } from "./types/common.js";
 import { collectAllPages } from "./paginator.js";
 
-const DEFAULT_API_VERSION = "v22.0";
+const DEFAULT_API_VERSION = "v25.0";
 const DEFAULT_BASE_URL = "https://graph.facebook.com";
 const DEFAULT_TIMEOUT = 30000;
 const MAX_RETRIES = 3;
