@@ -65,12 +65,13 @@ export function registerCreativeTools(server: McpServer): void {
   // ─── Create Ad Creative ──────────────────────────────────────
   server.tool(
     "meta_ads_create_ad_creative",
-    "Create a new ad creative with image/video, text, headline, and call-to-action. The creative can then be used when creating ads.",
+    "Create a new ad creative with image/video, text, headline, and call-to-action. Alternatively, promote an existing Instagram post by providing source_instagram_media_id. The creative can then be used when creating ads.",
     {
       account_id: z.string().describe("Ad account ID"),
       name: z.string().min(1).describe("Creative name"),
       page_id: z.string().describe("Facebook Page ID (required as the ad's identity)"),
-      instagram_actor_id: z.string().optional().describe("Instagram account ID"),
+      instagram_actor_id: z.string().optional().describe("Instagram account ID (from get_instagram_account). Required when promoting IG posts."),
+      source_instagram_media_id: z.string().optional().describe("Instagram media ID to create a creative from an existing IG post (from get_instagram_media). When provided, image_hash/image_url/video_id are ignored."),
       image_hash: z.string().optional().describe("Image hash from upload_ad_image"),
       image_url: z.string().optional().describe("Image URL (alternative to image_hash)"),
       video_id: z.string().optional().describe("Video ID"),
@@ -81,47 +82,51 @@ export function registerCreativeTools(server: McpServer): void {
       call_to_action_type: ctaEnum.optional().describe("Call-to-action button type"),
     },
     async ({
-      account_id, name, page_id, instagram_actor_id, image_hash, image_url,
-      video_id, link_url, message, headline, description, call_to_action_type,
+      account_id, name, page_id, instagram_actor_id, source_instagram_media_id,
+      image_hash, image_url, video_id, link_url, message, headline, description,
+      call_to_action_type,
     }) => {
       const id = normalizeAccountId(account_id);
 
-      // Build object_story_spec for link ads
-      const linkData: Record<string, unknown> = {};
-      if (image_hash) linkData.image_hash = image_hash;
-      if (image_url && !image_hash) linkData.picture = image_url;
-      if (link_url) linkData.link = link_url;
-      if (message) linkData.message = message;
-      if (headline) linkData.name = headline;
-      if (description) linkData.description = description;
-      if (call_to_action_type) {
-        linkData.call_to_action = {
-          type: call_to_action_type,
-          value: link_url ? { link: link_url } : undefined,
-        };
-      }
+      const body: Record<string, string | number | boolean> = { name };
 
-      const objectStorySpec: Record<string, unknown> = {
-        page_id,
-      };
-
-      if (video_id) {
-        objectStorySpec.video_data = {
-          video_id,
-          ...linkData,
-        };
+      if (source_instagram_media_id) {
+        // Promote an existing Instagram post
+        body.source_instagram_media_id = source_instagram_media_id;
+        body.object_story_spec = JSON.stringify({
+          page_id,
+          ...(instagram_actor_id ? { instagram_actor_id } : {}),
+        });
       } else {
-        objectStorySpec.link_data = linkData;
-      }
+        // Build object_story_spec for link/video ads
+        const linkData: Record<string, unknown> = {};
+        if (image_hash) linkData.image_hash = image_hash;
+        if (image_url && !image_hash) linkData.picture = image_url;
+        if (link_url) linkData.link = link_url;
+        if (message) linkData.message = message;
+        if (headline) linkData.name = headline;
+        if (description) linkData.description = description;
+        if (call_to_action_type) {
+          linkData.call_to_action = {
+            type: call_to_action_type,
+            value: link_url ? { link: link_url } : undefined,
+          };
+        }
 
-      if (instagram_actor_id) {
-        objectStorySpec.instagram_actor_id = instagram_actor_id;
-      }
+        const objectStorySpec: Record<string, unknown> = { page_id };
 
-      const body: Record<string, string | number | boolean> = {
-        name,
-        object_story_spec: JSON.stringify(objectStorySpec),
-      };
+        if (video_id) {
+          objectStorySpec.video_data = { video_id, ...linkData };
+        } else {
+          objectStorySpec.link_data = linkData;
+        }
+
+        if (instagram_actor_id) {
+          objectStorySpec.instagram_actor_id = instagram_actor_id;
+        }
+
+        body.object_story_spec = JSON.stringify(objectStorySpec);
+      }
 
       const result = await metaApiClient.postForm<{ id: string }>(
         `/${id}/adcreatives`,
@@ -132,7 +137,7 @@ export function registerCreativeTools(server: McpServer): void {
         content: [
           {
             type: "text",
-            text: `Creative created successfully!\nID: ${result.id}\nName: ${name}\nPage: ${page_id}\nCTA: ${call_to_action_type ?? "N/A"}`,
+            text: `Creative created successfully!\nID: ${result.id}\nName: ${name}\nPage: ${page_id}${source_instagram_media_id ? `\nIG Post: ${source_instagram_media_id}` : ""}\nCTA: ${call_to_action_type ?? "N/A"}`,
           },
         ],
       };

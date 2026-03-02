@@ -17,6 +17,7 @@ import { registerABTestingTools } from "./abtesting.js";
 import { registerReportTools } from "./reports.js";
 import { registerBillingTools } from "./billing.js";
 import { registerTokenTools } from "./tokens.js";
+import { registerInstagramTools } from "./instagram.js";
 
 /**
  * Register all Meta Ads tools on the MCP server.
@@ -43,8 +44,11 @@ export function registerAllTools(server: McpServer): void {
   registerReportTools(server);       // 3 tools — Async scheduled reports
   registerBillingTools(server);      // 3 tools — Billing & spend limits
 
+  // ─── Instagram ──────────────────────────────────────────
+  registerInstagramTools(server);    // 2 tools — IG account & media lookup
+
   // ─── Token Management ────────────────────────────────────
   registerTokenTools(server);        // 3 tools — Multi-token registry
 
-  // Total: 71 tools
+  // Total: 73 tools
 }

@@ -13,3 +13,4 @@ export * from "./audience.js";
 export * from "./pixel.js";
 export * from "./rule.js";
 export * from "./study.js";
+export * from "./instagram.js";

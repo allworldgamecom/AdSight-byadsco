@@ -3,10 +3,10 @@ import { registerAllTools } from "../../src/tools/index.js";
 import { createMockMcpServer } from "../setup.js";
 
 describe("registerAllTools", () => {
-  it("registers exactly 71 tools total", () => {
+  it("registers exactly 73 tools total", () => {
     const server = createMockMcpServer();
     registerAllTools(server as never);
-    expect(server.tool).toHaveBeenCalledTimes(71);
+    expect(server.tool).toHaveBeenCalledTimes(73);
   });
 
   it("registers all tools with unique names", () => {
@@ -61,6 +61,10 @@ describe("registerAllTools", () => {
     expect(names).toContain("meta_ads_list_tokens");
     expect(names).toContain("meta_ads_set_active_token");
     expect(names).toContain("meta_ads_register_token");
+
+    // Instagram tools
+    expect(names).toContain("meta_ads_get_instagram_account");
+    expect(names).toContain("meta_ads_get_instagram_media");
 
     // Extended feature tools
     expect(names).toContain("meta_ads_get_lead_forms");
