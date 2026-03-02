@@ -95,26 +95,37 @@ export function registerCreativeTools(server: McpServer): void {
         body.source_instagram_media_id = source_instagram_media_id;
         if (instagram_actor_id) body.instagram_actor_id = instagram_actor_id;
       } else {
-        // Build object_story_spec for link/video ads
-        const linkData: Record<string, unknown> = {};
-        if (image_hash) linkData.image_hash = image_hash;
-        if (image_url && !image_hash) linkData.picture = image_url;
-        if (link_url) linkData.link = link_url;
-        if (message) linkData.message = message;
-        if (headline) linkData.name = headline;
-        if (description) linkData.description = description;
-        if (call_to_action_type) {
-          linkData.call_to_action = {
-            type: call_to_action_type,
-            value: link_url ? { link: link_url } : undefined,
-          };
-        }
-
         const objectStorySpec: Record<string, unknown> = { page_id };
 
         if (video_id) {
-          objectStorySpec.video_data = { video_id, ...linkData };
+          // Video creative — link goes inside CTA, not as top-level field
+          const videoData: Record<string, unknown> = { video_id };
+          if (message) videoData.message = message;
+          if (image_hash) videoData.image_hash = image_hash;
+          if (image_url && !image_hash) videoData.image_url = image_url;
+          if (headline) videoData.title = headline;
+          if (call_to_action_type) {
+            videoData.call_to_action = {
+              type: call_to_action_type,
+              value: link_url ? { link: link_url } : undefined,
+            };
+          }
+          objectStorySpec.video_data = videoData;
         } else {
+          // Image/link creative — standard link_data structure
+          const linkData: Record<string, unknown> = {};
+          if (image_hash) linkData.image_hash = image_hash;
+          if (image_url && !image_hash) linkData.picture = image_url;
+          if (link_url) linkData.link = link_url;
+          if (message) linkData.message = message;
+          if (headline) linkData.name = headline;
+          if (description) linkData.description = description;
+          if (call_to_action_type) {
+            linkData.call_to_action = {
+              type: call_to_action_type,
+              value: link_url ? { link: link_url } : undefined,
+            };
+          }
           objectStorySpec.link_data = linkData;
         }
 
