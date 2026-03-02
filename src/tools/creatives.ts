@@ -344,4 +344,40 @@ export function registerCreativeTools(server: McpServer): void {
       };
     },
   );
+
+  // ─── Upload Ad Video ────────────────────────────────────────
+  server.tool(
+    "meta_ads_upload_ad_video",
+    "Upload a video to Meta for use in ad creatives. Provide a public video URL (MP4) — Meta will fetch it directly. Returns a video_id for use in create_ad_creative. Useful for promoting Instagram Reels: get the media_url from get_instagram_media and pass it here.",
+    {
+      account_id: z.string().describe("Ad account ID"),
+      file_url: z.string().describe("Public URL of the video file (MP4). Can be an Instagram Reel media_url."),
+      title: z.string().optional().describe("Title for the video"),
+      description: z.string().optional().describe("Description for the video"),
+    },
+    async ({ account_id, file_url, title, description }) => {
+      const id = normalizeAccountId(account_id);
+
+      const body: Record<string, string | number | boolean> = {
+        file_url,
+      };
+
+      if (title) body.title = title;
+      if (description) body.description = description;
+
+      const result = await metaApiClient.postForm<{ id: string }>(
+        `/${id}/advideos`,
+        body,
+      );
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Video uploaded successfully!\nID: ${result.id}\nTitle: ${title ?? "N/A"}\n\nUse this video_id "${result.id}" when creating a creative with create_ad_creative (video_id parameter).`,
+          },
+        ],
+      };
+    },
+  );
 }
