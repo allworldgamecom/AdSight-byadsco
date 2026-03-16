@@ -27,7 +27,6 @@
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "jose": "^6.0.0",
-    "meta-ads-mcp": "github:byadsco/meta-ads-mcp",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "zod": "^3.24.0"
