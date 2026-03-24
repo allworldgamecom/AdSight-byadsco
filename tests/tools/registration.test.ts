@@ -3,10 +3,10 @@ import { registerAllTools } from "../../src/tools/index.js";
 import { createMockMcpServer } from "../setup.js";
 
 describe("registerAllTools", () => {
-  it("registers exactly 75 tools total", () => {
+  it("registers exactly 76 tools total", () => {
     const server = createMockMcpServer();
     registerAllTools(server as never);
-    expect(server.tool).toHaveBeenCalledTimes(75);
+    expect(server.tool).toHaveBeenCalledTimes(76);
   });
 
   it("registers all tools with unique names", () => {
@@ -56,6 +56,7 @@ describe("registerAllTools", () => {
     expect(names).toContain("meta_ads_get_campaigns");
     expect(names).toContain("meta_ads_create_campaign");
     expect(names).toContain("meta_ads_get_insights");
+    expect(names).toContain("meta_ads_get_creative_details");
 
     // Token management tools
     expect(names).toContain("meta_ads_list_tokens");

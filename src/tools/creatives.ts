@@ -82,6 +82,37 @@ export function registerCreativeTools(server: McpServer): void {
     },
   );
 
+  // ─── Get Creative Details ────────────────────────────────────
+  server.tool(
+    "meta_ads_get_creative_details",
+    "Get detailed information about a specific creative.",
+    {
+      creative_id: z.string().describe("Creative ID"),
+      fields: z.array(z.string()).optional(),
+    },
+    async ({ creative_id, fields }) => {
+      const fieldsParam = buildFieldsParam(fields, [...CREATIVE_DEFAULT_FIELDS]);
+      const creative = await metaApiClient.get<AdCreative>(`/${creative_id}`, {
+        fields: fieldsParam,
+      });
+
+      const lines: string[] = [
+        `Creative: ${creative.name ?? "Unnamed"} (${creative.id})`,
+        `Status: ${creative.status ?? "N/A"}`,
+        `CTA: ${creative.call_to_action_type ?? "N/A"}`,
+        `Link URL: ${creative.link_url ?? "N/A"}`,
+        `Post ID: ${creative.effective_object_story_id ?? "N/A"}`,
+      ];
+
+      return {
+        content: [
+          { type: "text", text: lines.join("\n") },
+          { type: "text", text: JSON.stringify(creative, null, 2) },
+        ],
+      };
+    },
+  );
+
   // ─── Create Ad Creative ──────────────────────────────────────
   server.tool(
     "meta_ads_create_ad_creative",

@@ -4,7 +4,7 @@ MCP (Model Context Protocol) server for managing Meta Ads (Facebook/Instagram) c
 
 ## Features
 
-- **31 tools** covering the full Meta Ads lifecycle
+- **76 tools** covering campaign management, creatives, targeting, audiences, reporting, comments, billing, tokens, and Instagram workflows
 - **Multi-account support** — each request carries its own Meta access token
 - **Cloud-ready** — Streamable HTTP transport, stateless, Docker-ready
 - **Stdio support** — for local development with MCP clients
@@ -19,10 +19,21 @@ MCP (Model Context Protocol) server for managing Meta Ads (Facebook/Instagram) c
 | Campaigns | 5 | CRUD + status management |
 | Ad Sets | 5 | CRUD with full targeting spec |
 | Ads | 5 | CRUD with creative assignment |
-| Creatives | 4 | Create, update, image upload |
+| Creatives | 9 | List creatives, creative details, create/update creatives, image/video library and uploads |
 | Insights | 2 | Performance metrics with breakdowns |
-| Targeting | 6 | Interest/behavior/geo search, audience estimation |
+| Targeting | 7 | Interest/behavior/geo search, audience estimation |
 | Budget | 1 | Budget schedule management |
+| Leads | 4 | Lead forms and lead retrieval |
+| Audiences | 5 | Custom audiences and lookalikes |
+| Previews | 2 | Ad previews before launch |
+| Pixels | 5 | Pixel details, events, and conversions |
+| Comments | 4 | Ad comment moderation |
+| Rules | 5 | Automated rules and rule details |
+| A/B Testing | 3 | Ad study creation and inspection |
+| Reports | 3 | Async report creation and retrieval |
+| Billing | 3 | Billing info and spend limits |
+| Instagram | 2 | IG account and media lookup |
+| Tokens | 3 | Multi-token management |
 
 ## Quick Start
 
