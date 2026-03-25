@@ -27,6 +27,7 @@ export interface AdCreative {
   asset_feed_spec?: Record<string, unknown>;
   call_to_action_type?: CallToActionType;
   link_url?: string;
+  effective_link_url?: string;
   effective_object_story_id?: string;
   status?: string;
 }
@@ -56,6 +57,7 @@ export const CREATIVE_DEFAULT_FIELDS = [
   "asset_feed_spec",
   "call_to_action_type",
   "link_url",
+  "effective_link_url",
   "effective_object_story_id",
   "status",
 ] as const;

@@ -26,7 +26,7 @@ export function registerAllTools(server: McpServer): void {
   // ─── Core Ad Management ─────────────────────────────────
   registerAccountTools(server);      // 3 tools
   registerCampaignTools(server);     // 5 tools
-  registerAdSetTools(server);        // 5 tools
+  registerAdSetTools(server);        // 6 tools
   registerAdTools(server);           // 5 tools
   registerCreativeTools(server);     // 9 tools
   registerInsightsTools(server);     // 2 tools
@@ -50,5 +50,5 @@ export function registerAllTools(server: McpServer): void {
   // ─── Token Management ────────────────────────────────────
   registerTokenTools(server);        // 3 tools — Multi-token registry
 
-  // Total: 76 tools
+  // Total: 77 tools
 }

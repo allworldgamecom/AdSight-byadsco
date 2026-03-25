@@ -35,6 +35,43 @@ const ctaEnum = z.enum([
   "SHOP_WITH_AI", "TRY_ON_WITH_AI",
 ]);
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null ? value as Record<string, unknown> : undefined;
+}
+
+function getString(record: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = record?.[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function getNestedString(record: Record<string, unknown> | undefined, path: string[]): string | undefined {
+  let current: unknown = record;
+  for (const key of path) {
+    if (typeof current !== "object" || current === null || !(key in current)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  return typeof current === "string" && current.length > 0 ? current : undefined;
+}
+
+function extractEffectiveLinkUrl(creative: AdCreative): string | undefined {
+  if (creative.link_url) return creative.link_url;
+
+  const objectStorySpec = asRecord(creative.object_story_spec);
+  const videoData = asRecord(objectStorySpec?.["video_data"]);
+  const linkData = asRecord(objectStorySpec?.["link_data"]);
+  const assetFeedSpec = asRecord(creative.asset_feed_spec);
+
+  return (
+    getNestedString(videoData, ["call_to_action", "value", "link"])
+    ?? getString(linkData, "link")
+    ?? getNestedString(linkData, ["call_to_action", "value", "link"])
+    ?? getNestedString(assetFeedSpec, ["link_urls", "0", "website_url"])
+  );
+}
+
 export function registerCreativeTools(server: McpServer): void {
   // ─── Get Ad Creatives ────────────────────────────────────────
   server.tool(
@@ -95,19 +132,24 @@ export function registerCreativeTools(server: McpServer): void {
       const creative = await metaApiClient.get<AdCreative>(`/${creative_id}`, {
         fields: fieldsParam,
       });
+      const effectiveLinkUrl = extractEffectiveLinkUrl(creative);
+      const responseCreative =
+        effectiveLinkUrl && !creative.effective_link_url
+          ? { ...creative, effective_link_url: effectiveLinkUrl }
+          : creative;
 
       const lines: string[] = [
         `Creative: ${creative.name ?? "Unnamed"} (${creative.id})`,
         `Status: ${creative.status ?? "N/A"}`,
         `CTA: ${creative.call_to_action_type ?? "N/A"}`,
-        `Link URL: ${creative.link_url ?? "N/A"}`,
+        `Link URL: ${effectiveLinkUrl ?? "N/A"}`,
         `Post ID: ${creative.effective_object_story_id ?? "N/A"}`,
       ];
 
       return {
         content: [
           { type: "text", text: lines.join("\n") },
-          { type: "text", text: JSON.stringify(creative, null, 2) },
+          { type: "text", text: JSON.stringify(responseCreative, null, 2) },
         ],
       };
     },
@@ -116,7 +158,7 @@ export function registerCreativeTools(server: McpServer): void {
   // ─── Create Ad Creative ──────────────────────────────────────
   server.tool(
     "meta_ads_create_ad_creative",
-    "Create a new ad creative. Three modes: (1) Build from scratch with image/video + text via object_story_spec, (2) Promote an existing Facebook Page post via object_story_id ('Boost Post'), (3) Promote an existing Instagram post via source_instagram_media_id. The creative can then be used when creating ads.",
+    "Create a new ad creative. Three modes: (1) Build from scratch with image/video + text via object_story_spec, (2) Promote an existing Facebook Page post via object_story_id ('Boost Post'), (3) Promote an existing Instagram post via source_instagram_media_id. The creative can then be used when creating ads. Important: scratch-built video creatives require a thumbnail via image_hash or image_url; Meta rejects video_id without one.",
     {
       account_id: z.string().describe("Ad account ID"),
       name: z.string().min(1).describe("Creative name"),
@@ -163,6 +205,9 @@ export function registerCreativeTools(server: McpServer): void {
         // Mode 1: Build creative from scratch with object_story_spec
         if (!page_id) {
           throw new Error("page_id is required when building a creative from scratch (no object_story_id or source_instagram_media_id provided).");
+        }
+        if (video_id && !image_hash && !image_url) {
+          throw new Error("video creatives built from scratch require image_hash or image_url as a thumbnail.");
         }
         const objectStorySpec: Record<string, unknown> = { page_id };
 
