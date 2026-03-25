@@ -70,7 +70,7 @@ describe("registerCreativeTools", () => {
       const url = new URL(vi.mocked(fetch).mock.calls[0][0] as string);
       expect(url.pathname).toContain("/crt_123");
       expect(url.searchParams.get("fields")).toBe(
-        "id,name,title,body,image_hash,image_url,thumbnail_url,object_story_spec,asset_feed_spec,call_to_action_type,link_url,effective_object_story_id,status",
+        "id,name,title,body,image_hash,image_url,thumbnail_url,object_story_spec,asset_feed_spec,call_to_action_type,link_url,effective_link_url,effective_object_story_id,status",
       );
     });
 
@@ -91,6 +91,67 @@ describe("registerCreativeTools", () => {
 
       const url = new URL(vi.mocked(fetch).mock.calls[0][0] as string);
       expect(url.searchParams.get("fields")).toBe("id,name");
+    });
+
+    it("falls back to the effective link from video_data CTA when link_url is missing", async () => {
+      const server = createMockMcpServer();
+      registerCreativeTools(server as never);
+
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse({
+        id: "crt_video",
+        name: "Video Creative",
+        status: "ACTIVE",
+        call_to_action_type: "APPLY_NOW",
+        object_story_spec: {
+          page_id: "page_1",
+          video_data: {
+            video_id: "vid_1",
+            call_to_action: {
+              type: "APPLY_NOW",
+              value: { link: "https://ugc.byads.co/chile" },
+            },
+          },
+        },
+      })));
+
+      const handler = server._registeredTools[1].handler;
+      const result = await handler({
+        creative_id: "crt_video",
+        fields: undefined,
+      }) as { content: Array<{ type: string; text: string }> };
+
+      expect(result.content[0].text).toContain("Link URL: https://ugc.byads.co/chile");
+      expect(result.content[1].text).toContain("\"effective_link_url\": \"https://ugc.byads.co/chile\"");
+    });
+  });
+
+  describe("meta_ads_create_ad_creative handler", () => {
+    it("fails locally when a scratch video creative is missing thumbnail data", async () => {
+      const server = createMockMcpServer();
+      registerCreativeTools(server as never);
+
+      vi.stubGlobal("fetch", vi.fn());
+
+      const handler = server._registeredTools[2].handler;
+      await expect(handler({
+        account_id: "act_123",
+        name: "Video sin thumb",
+        page_id: "page_1",
+        video_id: "vid_123",
+        image_hash: undefined,
+        image_url: undefined,
+        link_url: "https://example.com",
+        message: "Texto",
+        headline: "Headline",
+        description: "Description",
+        call_to_action_type: "APPLY_NOW",
+        instagram_actor_id: undefined,
+        object_story_id: undefined,
+        source_instagram_media_id: undefined,
+        url_tags: undefined,
+      })).rejects.toThrow(/require image_hash or image_url as a thumbnail/i);
+
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     });
   });
 });

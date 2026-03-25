@@ -6,7 +6,7 @@ describe("registerAllTools", () => {
   it("registers exactly 76 tools total", () => {
     const server = createMockMcpServer();
     registerAllTools(server as never);
-    expect(server.tool).toHaveBeenCalledTimes(76);
+    expect(server.tool).toHaveBeenCalledTimes(77);
   });
 
   it("registers all tools with unique names", () => {
@@ -57,6 +57,7 @@ describe("registerAllTools", () => {
     expect(names).toContain("meta_ads_create_campaign");
     expect(names).toContain("meta_ads_get_insights");
     expect(names).toContain("meta_ads_get_creative_details");
+    expect(names).toContain("meta_ads_clone_adset_bundle");
 
     // Token management tools
     expect(names).toContain("meta_ads_list_tokens");
