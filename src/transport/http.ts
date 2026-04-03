@@ -9,6 +9,7 @@ import { oauthProvider } from "../auth/oauth-provider.js";
 import { isApiKeyConfigured, validateApiKey } from "../auth/api-key.js";
 import { requestContext } from "../auth/token-store.js";
 import { tokenManager } from "../auth/token-manager.js";
+import { resolveSecurityConfig } from "./security-config.js";
 import { logger } from "../utils/logger.js";
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -371,6 +372,7 @@ export async function startHttpTransport(
 ): Promise<void> {
   const app = express();
   const isProduction = process.env.NODE_ENV === "production";
+  const { approvalPin: expectedPin, pinRequired } = resolveSecurityConfig();
 
   // Trust proxy (Cloud Run terminates TLS at the load balancer)
   app.set("trust proxy", 1);
@@ -400,13 +402,6 @@ export async function startHttpTransport(
   }
 
   const serverUrl = getServerUrl();
-  const expectedPin = process.env.OAUTH_APPROVAL_PIN ?? "";
-  const pinRequired = !!expectedPin;
-
-  // Validate PIN strength in production
-  if (isProduction && pinRequired && expectedPin.length < 4) {
-    throw new Error("OAUTH_APPROVAL_PIN must be at least 4 characters in production");
-  }
 
   // ── Health check (no auth) ──────────────────────────────
   app.get("/health", (_req, res) => {

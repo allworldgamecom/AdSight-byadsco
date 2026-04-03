@@ -6,6 +6,7 @@ services:
     environment:
       - META_ACCESS_TOKEN=${META_ACCESS_TOKEN:-}
       - OAUTH_SECRET=${OAUTH_SECRET:-}
+      - OAUTH_APPROVAL_PIN=${OAUTH_APPROVAL_PIN:-}
       - SERVER_URL=${SERVER_URL:-http://localhost:3000}
       - META_API_VERSION=${META_API_VERSION:-v22.0}
       - PORT=3000

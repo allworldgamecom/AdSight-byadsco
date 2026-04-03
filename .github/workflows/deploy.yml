@@ -20,6 +20,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate required production secrets
+        env:
+          OAUTH_APPROVAL_PIN: ${{ secrets.OAUTH_APPROVAL_PIN }}
+          OAUTH_SECRET: ${{ secrets.OAUTH_SECRET }}
+        run: |
+          if [ -z "${OAUTH_APPROVAL_PIN}" ]; then
+            echo "Missing required secret: OAUTH_APPROVAL_PIN"
+            exit 1
+          fi
+
+          if [ -z "${OAUTH_SECRET}" ]; then
+            echo "Missing required secret: OAUTH_SECRET"
+            exit 1
+          fi
+
       - name: Authenticate to Google Cloud
         id: auth
         uses: google-github-actions/auth@v2

@@ -56,6 +56,8 @@ The server starts on `http://localhost:3000` with the `/mcp` endpoint.
 
 ```bash
 META_ACCESS_TOKEN=your_token    # Fallback token (optional if using Bearer auth)
+OAUTH_SECRET=your_random_secret # Required in production for OAuth JWT signing
+OAUTH_APPROVAL_PIN=your_pin     # Required in production for public HTTP deploys
 META_API_VERSION=v22.0          # Graph API version
 PORT=3000                       # Server port
 LOG_LEVEL=info                  # debug | info | warn | error
@@ -70,6 +72,10 @@ Authorization: Bearer <META_ACCESS_TOKEN>
 ```
 
 **Single-tenant:** Set `META_ACCESS_TOKEN` environment variable.
+
+For public HTTP deployments, production startup is fail-closed: both
+`OAUTH_SECRET` and `OAUTH_APPROVAL_PIN` must be configured or the server will
+refuse to start.
 
 ### Local Development (stdio)
 
@@ -111,6 +117,9 @@ Deploy the server and configure the MCP endpoint URL with Bearer token authentic
 URL: https://your-server.com/mcp
 Headers: Authorization: Bearer <your_meta_token>
 ```
+
+If you deploy this publicly, make sure `OAUTH_SECRET` and
+`OAUTH_APPROVAL_PIN` are set in the runtime environment before rollout.
 
 ## Meta API Permissions
 
