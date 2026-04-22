@@ -3,10 +3,10 @@ import { registerAllTools } from "../../src/tools/index.js";
 import { createMockMcpServer } from "../setup.js";
 
 describe("registerAllTools", () => {
-  it("registers exactly 76 tools total", () => {
+  it("registers exactly 79 tools total", () => {
     const server = createMockMcpServer();
     registerAllTools(server as never);
-    expect(server.tool).toHaveBeenCalledTimes(77);
+    expect(server.tool).toHaveBeenCalledTimes(79);
   });
 
   it("registers all tools with unique names", () => {

@@ -201,9 +201,9 @@ describe("MetaApiClient", () => {
       expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
     });
 
-    it("retries on rate limit errors", async () => {
+    it("does NOT retry on rate-limit errors (per Meta's 'stop calling' rule)", async () => {
       const retryClient = new MetaApiClient({
-        maxRetries: 1,
+        maxRetries: 3,
         timeout: 5000,
       });
 
@@ -214,17 +214,65 @@ describe("MetaApiClient", () => {
           code: 4,
         },
       });
-      const successResponse = mockFetchResponse({ data: [] });
+
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(rateLimitResponse));
+
+      await expect(retryClient.get("/me")).rejects.toThrow();
+      // Must be called exactly once — no backoff-and-retry inside the same request.
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    });
+
+    it("opens a circuit immediately on abuse signal (subcode 1996)", async () => {
+      const retryClient = new MetaApiClient({
+        maxRetries: 0,
+        timeout: 5000,
+      });
+
+      const abuseResponse = mockFetchResponse({
+        error: {
+          message: "Inconsistent request volume detected",
+          type: "OAuthException",
+          code: 613,
+          error_subcode: 1996,
+        },
+      });
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(abuseResponse));
+
+      await expect(retryClient.get("/act_123/insights")).rejects.toThrow();
+      // Subsequent call should short-circuit without hitting fetch.
+      await expect(retryClient.get("/act_123/insights")).rejects.toThrow(
+        /Circuit open/,
+      );
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not open a circuit across different ad accounts on a per-account throttle", async () => {
+      const retryClient = new MetaApiClient({
+        maxRetries: 0,
+        timeout: 5000,
+      });
+
+      const bucResponse = mockFetchResponse({
+        error: {
+          message: "Ads Management throttled",
+          type: "OAuthException",
+          code: 80004,
+        },
+      });
+      const okResponse = mockFetchResponse({ data: [] });
 
       vi.stubGlobal(
         "fetch",
         vi.fn()
-          .mockResolvedValueOnce(rateLimitResponse)
-          .mockResolvedValueOnce(successResponse),
+          .mockResolvedValueOnce(bucResponse)
+          .mockResolvedValueOnce(okResponse),
       );
 
-      const result = await retryClient.get("/me");
+      await expect(retryClient.get("/act_111/campaigns")).rejects.toThrow();
+      // Different account — circuit for act_111 must not block act_222.
+      const result = await retryClient.get("/act_222/campaigns");
       expect(result).toEqual({ data: [] });
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
     });
 
     it("does not retry auth errors", async () => {

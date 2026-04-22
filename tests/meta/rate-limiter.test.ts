@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { RateLimiter } from "../../src/meta/rate-limiter.js";
+import { RateLimiter, type RequestContext } from "../../src/meta/rate-limiter.js";
 
 describe("RateLimiter", () => {
   let limiter: RateLimiter;
+  const ctx: RequestContext = { tokenHash: "tok1", accountId: "act_100" };
+  const otherCtx: RequestContext = { tokenHash: "tok1", accountId: "act_999" };
 
   beforeEach(() => {
     limiter = new RateLimiter();
@@ -10,7 +12,7 @@ describe("RateLimiter", () => {
 
   describe("getThrottleDelay", () => {
     it("returns 0 when no headers have been processed", () => {
-      expect(limiter.getThrottleDelay()).toBe(0);
+      expect(limiter.getThrottleDelay(ctx)).toBe(0);
     });
 
     it("returns 0 when usage is below 75%", () => {
@@ -22,8 +24,9 @@ describe("RateLimiter", () => {
             total_time: 40,
           }),
         }),
+        ctx,
       );
-      expect(limiter.getThrottleDelay()).toBe(0);
+      expect(limiter.getThrottleDelay(ctx)).toBe(0);
     });
 
     it("returns linear backoff between 75-95%", () => {
@@ -35,8 +38,9 @@ describe("RateLimiter", () => {
             total_time: 0,
           }),
         }),
+        ctx,
       );
-      const delay = limiter.getThrottleDelay();
+      const delay = limiter.getThrottleDelay(ctx);
       expect(delay).toBeGreaterThan(0);
       expect(delay).toBeLessThan(2100);
     });
@@ -50,81 +54,110 @@ describe("RateLimiter", () => {
             total_time: 0,
           }),
         }),
+        ctx,
       );
-      const delay = limiter.getThrottleDelay();
-      expect(delay).toBeGreaterThanOrEqual(5000);
+      expect(limiter.getThrottleDelay(ctx)).toBeGreaterThanOrEqual(5000);
+    });
+
+    it("honours estimated_time_to_regain_access from BUC header", () => {
+      limiter.updateFromHeaders(
+        new Headers({
+          "x-business-use-case-usage": JSON.stringify({
+            biz1: [
+              {
+                type: "ads_insights",
+                call_count: 99,
+                total_cputime: 0,
+                total_time: 0,
+                estimated_time_to_regain_access: 30, // minutes
+                ads_api_access_tier: "development_access",
+              },
+            ],
+          }),
+        }),
+        ctx,
+      );
+      // 30 minutes = 1_800_000 ms
+      const delay = limiter.getThrottleDelay(ctx);
+      expect(delay).toBeGreaterThan(1_700_000);
+      expect(delay).toBeLessThanOrEqual(1_800_000);
+    });
+  });
+
+  describe("per-account isolation", () => {
+    it("does not apply one account's acc-scoped usage to another", () => {
+      limiter.updateFromHeaders(
+        new Headers({
+          "x-ad-account-usage": JSON.stringify({
+            acc_id_util_pct: 99,
+            reset_time_duration: 600,
+          }),
+        }),
+        ctx,
+      );
+      expect(limiter.getThrottleDelay(ctx)).toBeGreaterThan(0);
+      expect(limiter.getThrottleDelay(otherCtx)).toBe(0);
+    });
+
+    it("insights throttle app-portion applies across accounts", () => {
+      limiter.updateFromHeaders(
+        new Headers({
+          "x-fb-ads-insights-throttle": JSON.stringify({
+            app_id_util_pct: 99,
+            acc_id_util_pct: 50,
+            ads_api_access_tier: "standard_access",
+          }),
+        }),
+        ctx,
+      );
+      expect(limiter.getThrottleDelay(ctx)).toBeGreaterThan(0);
+      expect(limiter.getThrottleDelay(otherCtx)).toBeGreaterThan(0);
     });
   });
 
   describe("updateFromHeaders", () => {
-    it("reads x-app-usage header", () => {
-      limiter.updateFromHeaders(
-        new Headers({
-          "x-app-usage": JSON.stringify({
-            call_count: 80,
-            total_cputime: 10,
-            total_time: 20,
-          }),
-        }),
-      );
-      expect(limiter.currentUsage).toBe(80);
-    });
-
-    it("takes max of all app usage values", () => {
-      limiter.updateFromHeaders(
-        new Headers({
-          "x-app-usage": JSON.stringify({
-            call_count: 10,
-            total_cputime: 90,
-            total_time: 50,
-          }),
-        }),
-      );
-      expect(limiter.currentUsage).toBe(90);
-    });
-
-    it("reads x-business-use-case-usage header", () => {
+    it("reads x-business-use-case-usage across multiple businesses and types", () => {
       limiter.updateFromHeaders(
         new Headers({
           "x-business-use-case-usage": JSON.stringify({
-            "12345": [
-              { call_count: 85, total_cputime: 20, total_time: 30 },
+            biz_a: [
+              {
+                type: "ads_insights",
+                call_count: 40,
+                total_cputime: 10,
+                total_time: 10,
+              },
+            ],
+            biz_b: [
+              {
+                type: "ads_management",
+                call_count: 92,
+                total_cputime: 10,
+                total_time: 10,
+              },
             ],
           }),
         }),
+        ctx,
       );
-      expect(limiter.currentUsage).toBe(85);
-    });
-
-    it("handles max across multiple business accounts", () => {
-      limiter.updateFromHeaders(
-        new Headers({
-          "x-business-use-case-usage": JSON.stringify({
-            "11111": [
-              { call_count: 40, total_cputime: 10, total_time: 10 },
-            ],
-            "22222": [
-              { call_count: 92, total_cputime: 10, total_time: 10 },
-            ],
-          }),
-        }),
-      );
-      expect(limiter.currentUsage).toBe(92);
+      expect(limiter.snapshot()).toHaveLength(2);
+      expect(limiter.getThrottleDelay(ctx)).toBeGreaterThan(0);
     });
 
     it("ignores malformed x-app-usage header", () => {
       limiter.updateFromHeaders(
         new Headers({ "x-app-usage": "not json" }),
+        ctx,
       );
-      expect(limiter.currentUsage).toBe(0);
+      expect(limiter.getThrottleDelay(ctx)).toBe(0);
     });
 
     it("handles missing headers gracefully", () => {
-      limiter.updateFromHeaders(new Headers());
-      expect(limiter.currentUsage).toBe(0);
+      limiter.updateFromHeaders(new Headers(), ctx);
+      expect(limiter.getThrottleDelay(ctx)).toBe(0);
     });
 
-    it("takes max of app and business usage", () => {
+    it("takes max delay across app and business usage for the same context", () => {
       limiter.updateFromHeaders(
         new Headers({
           "x-app-usage": JSON.stringify({
@@ -133,18 +166,35 @@ describe("RateLimiter", () => {
             total_time: 0,
           }),
           "x-business-use-case-usage": JSON.stringify({
-            "123": [{ call_count: 80, total_cputime: 0, total_time: 0 }],
+            biz: [{ call_count: 80, total_cputime: 0, total_time: 0 }],
           }),
         }),
+        ctx,
       );
-      expect(limiter.currentUsage).toBe(80);
+      const delay = limiter.getThrottleDelay(ctx);
+      // 80% sits in the linear staircase zone
+      expect(delay).toBeGreaterThan(0);
+    });
+  });
+
+  describe("markRetryAfter", () => {
+    it("respects an explicitly recorded retry-after delay", () => {
+      limiter.markRetryAfter(ctx, "ads_insights", 120_000);
+      const delay = limiter.getThrottleDelay(ctx);
+      expect(delay).toBeGreaterThan(100_000);
+      expect(delay).toBeLessThanOrEqual(120_000);
+    });
+
+    it("does NOT apply a per-account retry-after to sibling accounts", () => {
+      limiter.markRetryAfter(ctx, "ads_insights", 120_000);
+      expect(limiter.getThrottleDelay(otherCtx)).toBe(0);
     });
   });
 
   describe("waitIfNeeded", () => {
     it("does not wait when usage is low", async () => {
       const start = Date.now();
-      await limiter.waitIfNeeded();
+      await limiter.waitIfNeeded(ctx);
       expect(Date.now() - start).toBeLessThan(50);
     });
 
@@ -158,31 +208,43 @@ describe("RateLimiter", () => {
             total_time: 0,
           }),
         }),
+        ctx,
       );
 
-      const promise = limiter.waitIfNeeded();
+      const promise = limiter.waitIfNeeded(ctx);
       vi.advanceTimersByTime(2100);
       await promise;
       vi.useRealTimers();
     });
   });
 
-  describe("currentUsage", () => {
-    it("returns 0 initially", () => {
-      expect(limiter.currentUsage).toBe(0);
+  describe("snapshot", () => {
+    it("returns an empty array initially", () => {
+      expect(limiter.snapshot()).toEqual([]);
     });
 
-    it("updates after processing headers", () => {
+    it("exposes parsed tier and retry-after for observability", () => {
       limiter.updateFromHeaders(
         new Headers({
-          "x-app-usage": JSON.stringify({
-            call_count: 45,
-            total_cputime: 0,
-            total_time: 0,
+          "x-business-use-case-usage": JSON.stringify({
+            biz: [
+              {
+                type: "ads_management",
+                call_count: 10,
+                total_cputime: 5,
+                total_time: 5,
+                estimated_time_to_regain_access: 2,
+                ads_api_access_tier: "development_access",
+              },
+            ],
           }),
         }),
+        ctx,
       );
-      expect(limiter.currentUsage).toBe(45);
+      const snap = limiter.snapshot();
+      expect(snap).toHaveLength(1);
+      expect(snap[0].adsApiAccessTier).toBe("development_access");
+      expect(snap[0].estimatedTimeToRegainAccessMs).toBe(120_000);
     });
   });
 });

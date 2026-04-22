@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash } from "node:crypto";
 import { tokenManager } from "./token-manager.js";
 
 export interface RequestContext {
@@ -38,4 +39,20 @@ export function getAccessToken(): string {
   throw new Error(
     "No Meta access token available. Provide via X-Meta-Token header, META_TOKENS env var, or META_ACCESS_TOKEN env var.",
   );
+}
+
+/**
+ * Short, stable, non-reversible identifier for the currently active access token.
+ *
+ * Used as a bucket key for rate-limit and circuit-breaker state so we never
+ * log or serialize the raw token. SHA-256 truncated to 12 hex chars ≈ 48 bits
+ * of entropy — enough to avoid collisions across an agency's handful of tokens.
+ */
+export function getAccessTokenHash(): string {
+  const token = getAccessToken();
+  return hashToken(token);
+}
+
+export function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex").slice(0, 12);
 }
