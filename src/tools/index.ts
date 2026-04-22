@@ -18,6 +18,7 @@ import { registerReportTools } from "./reports.js";
 import { registerBillingTools } from "./billing.js";
 import { registerTokenTools } from "./tokens.js";
 import { registerInstagramTools } from "./instagram.js";
+import { registerRateStatusTools } from "./rate-status.js";
 
 /**
  * Register all Meta Ads tools on the MCP server.
@@ -41,8 +42,9 @@ export function registerAllTools(server: McpServer): void {
   registerCommentTools(server);      // 4 tools — Ad comment moderation
   registerRuleTools(server);         // 5 tools — Automated rules
   registerABTestingTools(server);    // 3 tools — A/B split testing
-  registerReportTools(server);       // 3 tools — Async scheduled reports
+  registerReportTools(server);       // 4 tools — Async scheduled reports (+ run_and_wait)
   registerBillingTools(server);      // 3 tools — Billing & spend limits
+  registerRateStatusTools(server);   // 1 tool — Rate-limit usage + circuit status
 
   // ─── Instagram ──────────────────────────────────────────
   registerInstagramTools(server);    // 2 tools — IG account & media lookup
@@ -50,5 +52,5 @@ export function registerAllTools(server: McpServer): void {
   // ─── Token Management ────────────────────────────────────
   registerTokenTools(server);        // 3 tools — Multi-token registry
 
-  // Total: 77 tools
+  // Total: 79 tools
 }

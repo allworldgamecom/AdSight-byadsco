@@ -1,7 +1,13 @@
-import { getAccessToken } from "../auth/token-store.js";
+import { getAccessToken, hashToken } from "../auth/token-store.js";
 import { logger } from "../utils/logger.js";
-import { RateLimiter } from "./rate-limiter.js";
-import { isMetaApiError, mapMetaErrorToMcp } from "./errors.js";
+import { RateLimiter, type RequestContext } from "./rate-limiter.js";
+import { CircuitBreaker, type CircuitContext } from "./circuit-breaker.js";
+import { WritePacer } from "./write-pacer.js";
+import {
+  classifyMetaError,
+  isMetaApiError,
+  type MetaErrorClassification,
+} from "./errors.js";
 import type { MetaApiResponse } from "./types/common.js";
 import { collectAllPages } from "./paginator.js";
 
@@ -10,6 +16,7 @@ const DEFAULT_BASE_URL = "https://graph.facebook.com";
 const DEFAULT_TIMEOUT = 30000;
 const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY = 1000;
+const USAGE_LOG_INTERVAL_MS = 60_000;
 
 export interface MetaApiClientConfig {
   apiVersion?: string;
@@ -21,12 +28,19 @@ export interface MetaApiClientConfig {
 /**
  * Typed client for the Meta Graph API.
  *
- * Features:
- * - Automatic token resolution from AsyncLocalStorage / env
- * - Rate limiting based on X-App-Usage headers
- * - Retry with exponential backoff on 5xx / network errors
- * - Cursor-based pagination
- * - Meta error → MCP error mapping
+ * Compliance guarantees (see src/meta/errors.ts and rate-limiter.ts for
+ * references to Meta's docs):
+ *  - Bucketed rate-limiting per (token, ad-account, use-case type) — one hot
+ *    account does not slow down the rest of the agency.
+ *  - Circuit breaker halts requests to a bucket on abuse signals
+ *    (subcode 1996), temporary user/business blocks, or repeated throttle.
+ *  - Platform/BUC rate-limit errors (4, 17, 32, 613, 80000-80014) are NEVER
+ *    retried inside the same request — Meta's docs explicitly warn that
+ *    continuing to call after a throttle extends `estimated_time_to_regain_access`.
+ *  - Write operations (POST/DELETE) are paced by a preventive token bucket
+ *    sized to the Ads Management hourly quota.
+ *  - Every response's rate-limit headers update per-bucket state for future
+ *    self-throttling decisions.
  */
 export class MetaApiClient {
   private readonly apiVersion: string;
@@ -34,6 +48,9 @@ export class MetaApiClient {
   private readonly timeout: number;
   private readonly maxRetries: number;
   private readonly rateLimiter = new RateLimiter();
+  private readonly circuitBreaker = new CircuitBreaker();
+  private readonly writePacer = new WritePacer();
+  private lastUsageLogAt = 0;
 
   constructor(config?: MetaApiClientConfig) {
     this.apiVersion =
@@ -43,34 +60,25 @@ export class MetaApiClient {
     this.maxRetries = config?.maxRetries ?? MAX_RETRIES;
   }
 
-  /**
-   * GET request to a Graph API endpoint.
-   */
   async get<T>(
     path: string,
     params?: Record<string, string | number | boolean | undefined>,
   ): Promise<T> {
     const url = this.buildUrl(path, params);
-    return this.execute<T>("GET", url);
+    return this.execute<T>("GET", url, path);
   }
 
-  /**
-   * POST request to a Graph API endpoint.
-   */
   async post<T>(
     path: string,
     body?: Record<string, unknown>,
   ): Promise<T> {
     const url = this.buildUrl(path);
-    return this.execute<T>("POST", url, {
+    return this.execute<T>("POST", url, path, {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
   }
 
-  /**
-   * POST with URL-encoded form body (used for some Meta endpoints).
-   */
   async postForm<T>(
     path: string,
     params: Record<string, string | number | boolean>,
@@ -80,15 +88,12 @@ export class MetaApiClient {
     for (const [key, value] of Object.entries(params)) {
       formBody.set(key, String(value));
     }
-    return this.execute<T>("POST", url, {
+    return this.execute<T>("POST", url, path, {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: formBody.toString(),
     });
   }
 
-  /**
-   * POST with multipart/form-data (used for image uploads).
-   */
   async postMultipart<T>(
     path: string,
     formData: FormData,
@@ -96,21 +101,14 @@ export class MetaApiClient {
     const url = this.buildUrl(path);
     const token = getAccessToken();
     formData.set("access_token", token);
-    // Don't set Content-Type — fetch will set it with boundary
-    return this.execute<T>("POST", url, { body: formData }, true);
+    return this.execute<T>("POST", url, path, { body: formData }, true);
   }
 
-  /**
-   * DELETE request to a Graph API endpoint.
-   */
   async delete<T>(path: string): Promise<T> {
     const url = this.buildUrl(path);
-    return this.execute<T>("DELETE", url);
+    return this.execute<T>("DELETE", url, path);
   }
 
-  /**
-   * Fetch all pages of a paginated endpoint.
-   */
   async getPaginated<T>(
     path: string,
     params?: Record<string, string | number | boolean | undefined>,
@@ -124,6 +122,17 @@ export class MetaApiClient {
         this.get<MetaApiResponse<T>>(path, { ...params, after }),
       maxItems,
     );
+  }
+
+  /**
+   * Public snapshot for the `meta_ads_rate_status` tool.
+   */
+  getUsageSnapshot() {
+    return {
+      usage: this.rateLimiter.snapshot(),
+      circuits: this.circuitBreaker.snapshot(),
+      writePacer: this.writePacer.snapshot(),
+    };
   }
 
   // ─── Internal ────────────────────────────────────────────────
@@ -149,17 +158,35 @@ export class MetaApiClient {
   private async execute<T>(
     method: string,
     url: string,
+    path: string,
     options?: RequestInit,
     skipTokenParam = false,
   ): Promise<T> {
-    await this.rateLimiter.waitIfNeeded();
-
     const token = getAccessToken();
+    const tokenHash = hashToken(token);
+    const accountId = extractAccountId(path);
+    const context: RequestContext = { tokenHash, accountId };
+    const circuitContext: CircuitContext = {
+      tokenHash,
+      accountId,
+      type: guessBucType(method, path),
+    };
 
-    // Add access_token as query param (standard for Meta API)
-    const reqUrl = skipTokenParam
-      ? url
-      : this.appendToken(url, token);
+    // Circuit breaker is the hard stop: if open, never call Meta.
+    this.circuitBreaker.assertClosed(circuitContext);
+
+    // Preventive write pacing for POST / DELETE on account-scoped paths.
+    const isWrite =
+      (method === "POST" || method === "DELETE") &&
+      accountId !== undefined;
+    if (isWrite) {
+      await this.writePacer.acquire(tokenHash, accountId);
+    }
+
+    // Reactive self-throttle based on last-known usage headers.
+    await this.rateLimiter.waitIfNeeded(context);
+
+    const reqUrl = skipTokenParam ? url : this.appendToken(url, token);
 
     let lastError: Error | undefined;
 
@@ -179,50 +206,48 @@ export class MetaApiClient {
 
         clearTimeout(timeoutId);
 
-        // Update rate limiter from response headers
-        this.rateLimiter.updateFromHeaders(response.headers);
+        // Update rate-limiter + pacer from response headers — regardless of
+        // whether the response was OK. Throttle signals travel on error
+        // responses too.
+        this.rateLimiter.updateFromHeaders(response.headers, context);
+        this.maybeUpdatePacerTierFromHeaders(response.headers, tokenHash, accountId);
+        this.maybeLogUsage();
 
-        const body = await response.json() as unknown;
+        const body = (await response.json()) as unknown;
 
-        // Check for Meta API errors
         if (isMetaApiError(body)) {
-          const mcpError = mapMetaErrorToMcp(body.error);
+          const classification = classifyMetaError(body.error);
+          this.logMetaError(body.error, classification, context, path);
 
-          // Don't retry auth errors or invalid params
-          if (
-            body.error.code === 190 ||
-            body.error.code === 100 ||
-            body.error.code === 10
-          ) {
-            throw mcpError;
+          if (classification.throttled) {
+            // Seed the rate-limiter with the retry-after hint so sibling
+            // requests back off even before the next header arrives.
+            if (classification.retryAfterMs) {
+              this.rateLimiter.markRetryAfter(
+                context,
+                circuitContext.type ?? "unknown",
+                classification.retryAfterMs,
+              );
+            }
+            this.circuitBreaker.trip(circuitContext, classification);
+            // Meta's doc: "If you reach the limit, stop making API calls."
+            throw classification.mcpError;
           }
 
-          // Retry rate limit errors
-          if (
-            body.error.code === 4 ||
-            body.error.code === 17 ||
-            body.error.code === 32
-          ) {
-            lastError = mcpError;
+          if (classification.retryable && attempt < this.maxRetries) {
+            lastError = classification.mcpError;
             await this.backoff(attempt);
             continue;
           }
 
-          // Retry server errors
-          if (body.error.code === 1 || body.error.code === 2) {
-            lastError = mcpError;
-            await this.backoff(attempt);
-            continue;
-          }
-
-          throw mcpError;
+          throw classification.mcpError;
         }
 
         if (!response.ok) {
           lastError = new Error(
             `HTTP ${response.status}: ${JSON.stringify(body)}`,
           );
-          if (response.status >= 500) {
+          if (response.status >= 500 && attempt < this.maxRetries) {
             await this.backoff(attempt);
             continue;
           }
@@ -231,10 +256,7 @@ export class MetaApiClient {
 
         return body as T;
       } catch (error) {
-        if (
-          error instanceof Error &&
-          error.name === "AbortError"
-        ) {
+        if (error instanceof Error && error.name === "AbortError") {
           lastError = new Error(`Request timeout after ${this.timeout}ms`);
           if (attempt < this.maxRetries) {
             await this.backoff(attempt);
@@ -242,7 +264,7 @@ export class MetaApiClient {
           }
         }
 
-        // If it's already an MCP error, don't wrap it
+        // Already-classified errors bubble up unchanged.
         if (error instanceof Error && "code" in error) {
           throw error;
         }
@@ -255,7 +277,7 @@ export class MetaApiClient {
       }
     }
 
-    logger.error({ error: lastError }, "All retries exhausted");
+    logger.error({ error: lastError, path }, "All retries exhausted");
     throw lastError ?? new Error("Request failed after retries");
   }
 
@@ -267,12 +289,127 @@ export class MetaApiClient {
 
   private async backoff(attempt: number): Promise<void> {
     const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
-    const jitter = Math.random() * delay * 0.1;
-    logger.debug({ attempt, delay: delay + jitter }, "Retrying after backoff");
-    await new Promise((resolve) =>
-      setTimeout(resolve, delay + jitter),
-    );
+    const jitter = delay * (Math.random() * 0.4 - 0.2); // ±20%
+    await new Promise((resolve) => setTimeout(resolve, delay + jitter));
   }
+
+  private maybeUpdatePacerTierFromHeaders(
+    headers: Headers,
+    tokenHash: string,
+    accountId: string | undefined,
+  ): void {
+    if (!accountId) return;
+    const throttle = headers.get("x-fb-ads-insights-throttle");
+    if (throttle) {
+      try {
+        const parsed = JSON.parse(throttle) as { ads_api_access_tier?: string };
+        if (parsed.ads_api_access_tier) {
+          this.writePacer.updateTier(tokenHash, accountId, parsed.ads_api_access_tier);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    const acc = headers.get("x-ad-account-usage");
+    if (acc) {
+      try {
+        const parsed = JSON.parse(acc) as { ads_api_access_tier?: string };
+        if (parsed.ads_api_access_tier) {
+          this.writePacer.updateTier(tokenHash, accountId, parsed.ads_api_access_tier);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  private logMetaError(
+    error: { code: number; error_subcode?: number; message: string; fbtrace_id?: string },
+    classification: MetaErrorClassification,
+    context: RequestContext,
+    path: string,
+  ): void {
+    const payload = {
+      event: "meta_error",
+      path,
+      meta_error_code: error.code,
+      meta_subcode: error.error_subcode,
+      fbtrace_id: error.fbtrace_id,
+      category: classification.category,
+      throttled: classification.throttled,
+      retryAfterMs: classification.retryAfterMs,
+      tokenHash: context.tokenHash,
+      accountId: context.accountId,
+    };
+    if (classification.critical) {
+      logger.fatal(payload, error.message);
+    } else if (
+      classification.category === "invalid_params" ||
+      classification.category === "duplicate"
+    ) {
+      // 4xx user-side — count as user_errors signal (Insights formula subtracts
+      // 0.001 × user_errors from hourly quota).
+      logger.warn({ ...payload, event: "meta_user_error" }, error.message);
+    } else {
+      logger.error(payload, error.message);
+    }
+  }
+
+  private maybeLogUsage(): void {
+    const now = Date.now();
+    if (now - this.lastUsageLogAt < USAGE_LOG_INTERVAL_MS) return;
+    this.lastUsageLogAt = now;
+    const snapshot = this.rateLimiter.snapshot();
+    if (snapshot.length === 0) return;
+    const tier = snapshot.find((b) => b.adsApiAccessTier)?.adsApiAccessTier;
+    logger.info(
+      {
+        event: "meta_rate_usage",
+        buckets: snapshot.length,
+        maxCallPct: snapshot.reduce((m, b) => Math.max(m, b.callCount), 0),
+        adsApiAccessTier: tier,
+      },
+      "Meta API usage snapshot",
+    );
+    if (tier === "development_access") {
+      logger.warn(
+        { event: "meta_access_tier" },
+        "Running on development_access tier — apply for Advanced Access to raise the Ads Management / Insights quota",
+      );
+    }
+  }
+}
+
+/**
+ * Extract the first id-like segment after the API version. For account-scoped
+ * paths like `/act_123/insights` or `/act_123/campaigns`, returns `act_123`.
+ * For `/<object_id>/insights` etc., returns `<object_id>`.
+ */
+function extractAccountId(path: string): string | undefined {
+  const stripped = path.startsWith("/") ? path.slice(1) : path;
+  const [first] = stripped.split("/");
+  if (!first) return undefined;
+  if (/^act_\d+$/i.test(first)) return first;
+  if (/^\d+$/.test(first)) return first;
+  return undefined;
+}
+
+/**
+ * Best-effort hint for which BUC pool a request counts against. Used to scope
+ * circuit-breaker state — a throttle on Insights should not freeze Audience
+ * writes for the same account.
+ */
+function guessBucType(method: string, path: string): string {
+  if (/\/insights(\?|$|\/)/.test(path) || /\/insights$/.test(path)) {
+    return "ads_insights";
+  }
+  if (/\/customaudiences(\?|$|\/)/.test(path) || path.includes("/customaudiences")) {
+    return "custom_audience";
+  }
+  if (method === "POST" || method === "DELETE") {
+    return "ads_management";
+  }
+  return "ads_management";
 }
 
 /**
