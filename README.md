@@ -100,6 +100,8 @@ Tool definitions live under [src/tools/](src/tools/), wired together in [src/too
 
 ### Install & run
 
+**Option A — from source (contributors, self-hosters):**
+
 ```bash
 git clone https://github.com/byadsco/meta-ads-mcp.git
 cd meta-ads-mcp
@@ -108,7 +110,26 @@ npm run build
 npm start
 ```
 
-The server starts on `http://localhost:3000` with the `/mcp` endpoint and a health check at `/health`.
+**Option B — from GitHub Packages (npm):** scoped to `@byadsco`, hosted on `npm.pkg.github.com`. Requires a GitHub Personal Access Token with `read:packages` scope.
+
+```bash
+# tell npm where the @byadsco scope lives
+echo "@byadsco:registry=https://npm.pkg.github.com" >> .npmrc
+echo "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}" >> .npmrc
+
+npm install @byadsco/meta-ads-mcp
+npx meta-ads-mcp                 # HTTP transport, port 3000
+npx meta-ads-mcp --transport stdio
+```
+
+**Option C — from GitHub Container Registry (Docker):**
+
+```bash
+docker pull ghcr.io/byadsco/meta-ads-mcp:latest
+docker run --rm -p 3000:3000 --env-file .env ghcr.io/byadsco/meta-ads-mcp:latest
+```
+
+The server starts on `http://localhost:3000` with the `/mcp` endpoint and a health check at `/health`. New versions are published on every GitHub Release ([releases](https://github.com/byadsco/meta-ads-mcp/releases)).
 
 ### Environment variables
 
@@ -276,7 +297,13 @@ Structured logs fire on every Meta error (`event=meta_error`), abuse signal (`ev
 
 ### Docker
 
+Pre-built images are published to **GitHub Container Registry** (`ghcr.io/byadsco/meta-ads-mcp`) on every release — tagged with the semver version (`2.0.1`, `2.0`, `2`) and `latest`.
+
 ```bash
+# pull a published release
+docker run --rm -p 3000:3000 --env-file .env ghcr.io/byadsco/meta-ads-mcp:latest
+
+# or build from source
 docker compose up
 ```
 
