@@ -1,0 +1,95 @@
+name: Bug report
+description: Report a reproducible problem with meta-ads-mcp.
+title: "bug: <short description>"
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please fill in the sections below.
+        For **security vulnerabilities**, do not file a public issue —
+        follow [SECURITY.md](https://github.com/byadsco/meta-ads-mcp/blob/main/SECURITY.md) instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Output of `git rev-parse HEAD` or the package version you installed.
+      placeholder: "cbe5481 or @byadsco/meta-ads-mcp@2.0.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      description: Which transport are you running?
+      options:
+        - http
+        - stdio
+        - both
+        - other / unsure
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      placeholder: "20.18.0"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / runtime
+      description: e.g. macOS 14, Ubuntu 22.04, Cloud Run, Docker.
+      placeholder: "Cloud Run (managed)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Exact steps. Include the MCP tool call or HTTP request that triggers the bug.
+      placeholder: |
+        1. Set OAUTH_SECRET=...
+        2. Run `npm run dev`
+        3. Call tool `list_ad_accounts` with args `{...}`
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the full error message and stack trace if any. Redact tokens with `EAA…` and `AIza…`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Pino structured log lines around the error. **Redact secrets before pasting.**
+      render: shell
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirm
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: I have removed any tokens, keys, or other secrets from the logs and repro.
+          required: true

@@ -1,0 +1,34 @@
+# CODEOWNERS for meta-ads-mcp
+#
+# When `require_code_owner_reviews` is enabled in branch protection on `main`,
+# any pull request that touches a path listed here requires an approving review
+# from at least one of the owners.
+#
+# Order matters: the LAST matching pattern wins.
+# See https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner — anything not matched by a more specific pattern.
+*                                   @MaxterPC
+
+# Authentication & encryption surface — highest blast radius.
+/src/auth/                          @MaxterPC
+/src/store/                         @MaxterPC
+/src/transport/auth-routes.ts       @MaxterPC
+/src/transport/security-config.ts   @MaxterPC
+
+# CI/CD, secret scanning, and deploy plumbing.
+/.github/                           @MaxterPC
+/.gitleaks.toml                     @MaxterPC
+/.gitignore                         @MaxterPC
+/Dockerfile                         @MaxterPC
+/docker-compose.yml                 @MaxterPC
+/scripts/                           @MaxterPC
+
+# Package manifest and lockfile — supply-chain surface.
+/package.json                       @MaxterPC
+/package-lock.json                  @MaxterPC
+
+# Project policy and security docs.
+/SECURITY.md                        @MaxterPC
+/CODE_OF_CONDUCT.md                 @MaxterPC
+/LICENSE                            @MaxterPC

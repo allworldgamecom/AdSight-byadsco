@@ -1,0 +1,78 @@
+# Dependabot config for meta-ads-mcp.
+#
+# - npm: weekly grouped updates; ignore major bumps for the MCP SDK
+#   (those need manual review of the protocol change).
+# - github-actions: weekly, all in one PR so SHA-pinned actions can be
+#   upgraded in lockstep.
+# - docker: weekly for the base image referenced in the Dockerfile.
+#
+# Security updates run continuously regardless of this schedule (driven by
+# GitHub Advisory Database). Verified via `gh api repos/byadsco/meta-ads-mcp/automated-security-fixes`.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Bogota
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    labels:
+      - dependencies
+      - npm
+    groups:
+      dev-dependencies:
+        dependency-type: development
+      typescript:
+        patterns:
+          - "typescript"
+          - "tsx"
+          - "@types/*"
+          - "@typescript-eslint/*"
+          - "typescript-eslint"
+      eslint:
+        patterns:
+          - "eslint"
+          - "eslint-*"
+          - "@eslint/*"
+    ignore:
+      - dependency-name: "@modelcontextprotocol/sdk"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Bogota
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+      include: scope
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Bogota
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore
+      include: scope
+    labels:
+      - dependencies
+      - docker
