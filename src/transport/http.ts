@@ -22,6 +22,9 @@ import {
   InMemoryAuthCodesStore,
 } from "../store/persistent-auth-codes.js";
 import {
+  configureMetaTokenRepo,
+  FirestoreMetaTokenRepo,
+  InMemoryMetaTokenRepo,
   getDecryptedToken,
   getDefaultTokenName,
   listTokens,
@@ -402,6 +405,11 @@ export async function startHttpTransport(
 
   if (config.multiTenantEnabled) {
     if (!isFirestoreEnabled()) {
+      if (process.env.NODE_ENV === "production") {
+        throw new Error(
+          "Multi-tenant Meta OAuth requires Firestore in production. Set FIRESTORE_PROJECT_ID or GOOGLE_CLOUD_PROJECT.",
+        );
+      }
       logger.warn(
         "Multi-tenant Meta OAuth enabled but Firestore is not configured (no FIRESTORE_PROJECT_ID/GOOGLE_CLOUD_PROJECT/FIRESTORE_EMULATOR_HOST). Falling back to in-memory stores — sessions and tokens will be lost on restart.",
       );
@@ -410,12 +418,14 @@ export async function startHttpTransport(
         authCodesStore: new InMemoryAuthCodesStore(),
         resolvePendingAuth: () => pendingAuthStorage.getStore() ?? null,
       });
+      configureMetaTokenRepo(new InMemoryMetaTokenRepo());
     } else {
       oauthProvider.configure({
         clientsStore: new FirestoreClientsStore(),
         authCodesStore: new FirestoreAuthCodesStore(),
         resolvePendingAuth: () => pendingAuthStorage.getStore() ?? null,
       });
+      configureMetaTokenRepo(new FirestoreMetaTokenRepo());
     }
   }
 

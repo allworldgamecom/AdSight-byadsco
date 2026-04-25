@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import express from "express";
 import {
   buildAuthorizeUrl,
@@ -11,6 +10,7 @@ import {
 } from "../auth/meta-oauth.js";
 import { isAllowed } from "../auth/email-allowlist.js";
 import { clearSession, getSession, setSession } from "../auth/session.js";
+import { signOAuthState, verifyOAuthState } from "../auth/oauth-state.js";
 import {
   deleteToken,
   getDefaultTokenName,
@@ -19,35 +19,6 @@ import {
   upsertUser,
 } from "../store/meta-token-repo.js";
 import { logger } from "../utils/logger.js";
-
-interface OAuthState {
-  nonce: string;
-  returnTo: string;
-}
-
-const oauthStates = new Map<string, OAuthState>();
-const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
-
-setInterval(() => {
-  const cutoff = Date.now() - OAUTH_STATE_TTL_MS;
-  for (const [id, state] of oauthStates) {
-    if (parseStateTimestamp(state.nonce) < cutoff) {
-      oauthStates.delete(id);
-    }
-  }
-}, 5 * 60 * 1000).unref();
-
-function makeStateId(): string {
-  const ts = Date.now().toString(36);
-  const rand = crypto.randomBytes(12).toString("hex");
-  return `${ts}.${rand}`;
-}
-
-function parseStateTimestamp(stateId: string): number {
-  const ts = stateId.split(".")[0];
-  if (!ts) return 0;
-  return parseInt(ts, 36) || 0;
-}
 
 function safeReturnTo(input: unknown): string {
   if (typeof input !== "string") return "/authorize";
@@ -97,19 +68,16 @@ export function mountAuthRoutes(
 ): void {
   const { serverUrl } = options;
 
-  app.get("/auth/meta", (req, res) => {
+  app.get("/auth/meta", async (req, res) => {
     const config = getMetaConfigOr500(serverUrl, res);
     if (!config) return;
 
-    const stateId = makeStateId();
-    oauthStates.set(stateId, {
-      nonce: stateId,
-      returnTo: safeReturnTo(
-        typeof req.query.return === "string" ? req.query.return : req.originalUrl,
-      ),
-    });
+    const returnTo = safeReturnTo(
+      typeof req.query.return === "string" ? req.query.return : req.originalUrl,
+    );
+    const state = await signOAuthState({ returnTo });
 
-    res.redirect(302, buildAuthorizeUrl(config, stateId));
+    res.redirect(302, buildAuthorizeUrl(config, state));
   });
 
   app.get("/auth/meta/callback", async (req, res) => {
@@ -129,12 +97,11 @@ export function mountAuthRoutes(
       return;
     }
 
-    const pending = oauthStates.get(state);
+    const pending = await verifyOAuthState(state);
     if (!pending) {
       renderError(res, 400, "Invalid or expired OAuth state.");
       return;
     }
-    oauthStates.delete(state);
 
     try {
       const shortLived = await exchangeCodeForToken(config, code);
@@ -175,7 +142,7 @@ export function mountAuthRoutes(
         name: profile.name,
       });
 
-      res.redirect(302, pending.returnTo);
+      res.redirect(302, safeReturnTo(pending.returnTo));
     } catch (err) {
       logger.error(
         { error: err instanceof Error ? err.message : String(err) },
