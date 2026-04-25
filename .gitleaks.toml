@@ -108,6 +108,9 @@ paths = [
   '''^CHANGELOG\.md$''',
   '''^README\.md$''',
   '''^CLAUDE\.md$''',
+  '''^AGENTS\.md$''',
+  '''^SECURITY\.md$''',
+  '''^CONTRIBUTING\.md$''',
 ]
 regexes = [
   # Common placeholder values used in docs and examples.
