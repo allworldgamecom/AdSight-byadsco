@@ -82,23 +82,81 @@ jobs:
           AUTH_ALLOWED_EMAILS: ${{ secrets.AUTH_ALLOWED_EMAILS }}
           AUTH_ALLOWED_DOMAINS: ${{ secrets.AUTH_ALLOWED_DOMAINS }}
           AUTH_ALLOWED_FB_USER_IDS: ${{ secrets.AUTH_ALLOWED_FB_USER_IDS }}
+          FIRESTORE_PROJECT_ID: ${{ secrets.FIRESTORE_PROJECT_ID }}
         run: |
-          missing=()
-          [ -z "${OAUTH_SECRET}" ]           && missing+=("OAUTH_SECRET")
-          [ -z "${TOKEN_ENCRYPTION_KEY}" ]   && missing+=("TOKEN_ENCRYPTION_KEY")
-          [ -z "${SESSION_COOKIE_SECRET}" ]  && missing+=("SESSION_COOKIE_SECRET")
-          [ -z "${META_APP_ID}" ]            && missing+=("META_APP_ID")
-          [ -z "${META_APP_SECRET}" ]        && missing+=("META_APP_SECRET")
-          if [ ${#missing[@]} -ne 0 ]; then
-            echo "Missing required secrets: ${missing[*]}"
+          set -u
+          errors=()
+
+          # Treat placeholder strings as "not set". `-z` alone misses these
+          # because GitHub will happily store "-" or "TODO" as a secret value
+          # and the runtime then crashes deep in the container instead of
+          # failing the deploy gate.
+          looks_unset() {
+            local v="$1"
+            [ -z "$v" ] && return 0
+            case "$v" in
+              -|--|x|xx|xxx|TODO|todo|none|None|NONE|placeholder|PLACEHOLDER) return 0 ;;
+              "change-me"|"change_me"|"changeme"|"<value>"|"<unset>") return 0 ;;
+              your_*|your-*|YOUR_*) return 0 ;;
+            esac
+            [ "${#v}" -lt 8 ] && return 0
+            return 1
+          }
+
+          require_present() {
+            local name="$1" value="$2"
+            if looks_unset "$value"; then
+              errors+=("$name is missing or looks like a placeholder")
+            fi
+          }
+
+          require_min_length() {
+            local name="$1" value="$2" min="$3"
+            if [ "${#value}" -lt "$min" ]; then
+              errors+=("$name must be at least ${min} characters (got ${#value})")
+            fi
+          }
+
+          require_regex() {
+            local name="$1" value="$2" regex="$3" desc="$4"
+            if ! printf '%s' "$value" | grep -Eq "$regex"; then
+              errors+=("$name must be ${desc}")
+            fi
+          }
+
+          require_present OAUTH_SECRET            "${OAUTH_SECRET}"
+          require_present TOKEN_ENCRYPTION_KEY    "${TOKEN_ENCRYPTION_KEY}"
+          require_present SESSION_COOKIE_SECRET   "${SESSION_COOKIE_SECRET}"
+          require_present META_APP_ID             "${META_APP_ID}"
+          require_present META_APP_SECRET         "${META_APP_SECRET}"
+          require_present FIRESTORE_PROJECT_ID    "${FIRESTORE_PROJECT_ID}"
+
+          # Format: matches resolveSecurityConfig() in src/transport/security-config.ts
+          require_regex   TOKEN_ENCRYPTION_KEY    "${TOKEN_ENCRYPTION_KEY}"  '^[0-9a-fA-F]{64}$' "64 hex chars (32 bytes)"
+          require_min_length SESSION_COOKIE_SECRET "${SESSION_COOKIE_SECRET}" 32
+          require_min_length OAUTH_SECRET         "${OAUTH_SECRET}"          32
+          # Meta App ID is a numeric string (typ. 15-17 digits)
+          require_regex   META_APP_ID             "${META_APP_ID}"           '^[0-9]{10,20}$' "10-20 digit numeric Meta App ID"
+          # Meta App Secret is a 32-char hex string
+          require_regex   META_APP_SECRET         "${META_APP_SECRET}"       '^[0-9a-fA-F]{32}$' "32 hex chars"
+          # GCP project ID format: 6-30 chars, lowercase, starts with letter, ends with letter/digit
+          require_regex   FIRESTORE_PROJECT_ID    "${FIRESTORE_PROJECT_ID}"  '^[a-z][a-z0-9-]{4,28}[a-z0-9]$' "valid GCP project ID"
+
+          # At least one allowlist source must be a real value
+          allowlist_ok=0
+          for v in "${AUTH_ALLOWED_EMAILS}" "${AUTH_ALLOWED_DOMAINS}" "${AUTH_ALLOWED_FB_USER_IDS}"; do
+            if ! looks_unset "$v"; then allowlist_ok=1; fi
+          done
+          if [ "$allowlist_ok" -eq 0 ]; then
+            errors+=("at least one of AUTH_ALLOWED_EMAILS / AUTH_ALLOWED_DOMAINS / AUTH_ALLOWED_FB_USER_IDS must hold a real value")
+          fi
+
+          if [ "${#errors[@]}" -ne 0 ]; then
+            echo "Production secret validation failed:"
+            printf '  - %s\n' "${errors[@]}"
             exit 1
           fi
-          if [ -z "${AUTH_ALLOWED_EMAILS}" ] \
-             && [ -z "${AUTH_ALLOWED_DOMAINS}" ] \
-             && [ -z "${AUTH_ALLOWED_FB_USER_IDS}" ]; then
-            echo "At least one of AUTH_ALLOWED_EMAILS / AUTH_ALLOWED_DOMAINS / AUTH_ALLOWED_FB_USER_IDS must be set"
-            exit 1
-          fi
+          echo "All production secrets validated."
 
       - name: Authenticate to Google Cloud
         id: auth
