@@ -168,6 +168,60 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f  # v2
 
+      - name: Sync META_TOKENS to Secret Manager
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION }}
+          META_TOKENS: ${{ secrets.META_TOKENS }}
+        run: |
+          set -u
+          if [ -z "${META_TOKENS}" ]; then
+            echo "META_TOKENS not set; skipping Secret Manager sync"
+            exit 0
+          fi
+
+          # Sanity-check: it must be valid JSON (catches the buggy
+          # comma-split fragments that broke production).
+          if ! printf '%s' "${META_TOKENS}" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' 2>/dev/null; then
+            echo "META_TOKENS is not valid JSON; refusing to sync"
+            exit 1
+          fi
+
+          SECRET_NAME=meta-tokens-prod
+          RUNTIME_SA=$(gcloud run services describe "$SERVICE_NAME" \
+            --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
+            --format='value(spec.template.spec.serviceAccountName)' 2>/dev/null || true)
+          if [ -z "$RUNTIME_SA" ]; then
+            # Fallback: default Compute SA if the service hasn't been created yet
+            PROJECT_NUMBER=$(gcloud projects describe "$GCP_PROJECT_ID" --format='value(projectNumber)')
+            RUNTIME_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+          fi
+
+          if ! gcloud secrets describe "$SECRET_NAME" --project="$GCP_PROJECT_ID" --quiet >/dev/null 2>&1; then
+            printf '%s' "${META_TOKENS}" | gcloud secrets create "$SECRET_NAME" \
+              --data-file=- --replication-policy=automatic \
+              --project="$GCP_PROJECT_ID" --quiet
+            gcloud secrets add-iam-policy-binding "$SECRET_NAME" \
+              --member="serviceAccount:${RUNTIME_SA}" \
+              --role=roles/secretmanager.secretAccessor \
+              --project="$GCP_PROJECT_ID" --quiet >/dev/null
+            echo "Created Secret Manager secret $SECRET_NAME and granted ${RUNTIME_SA} access."
+          else
+            # Only add a new version if the value actually changed — avoids
+            # one new version per deploy (Secret Manager bills per-version).
+            existing_hash=$(gcloud secrets versions access latest \
+              --secret="$SECRET_NAME" --project="$GCP_PROJECT_ID" 2>/dev/null \
+              | shasum -a 256 | cut -d' ' -f1 || true)
+            desired_hash=$(printf '%s' "${META_TOKENS}" | shasum -a 256 | cut -d' ' -f1)
+            if [ "${existing_hash}" != "${desired_hash}" ]; then
+              printf '%s' "${META_TOKENS}" | gcloud secrets versions add "$SECRET_NAME" \
+                --data-file=- --project="$GCP_PROJECT_ID" --quiet
+              echo "Added new version of $SECRET_NAME (value changed)."
+            else
+              echo "$SECRET_NAME is already up to date."
+            fi
+          fi
+
       - name: Configure Docker for Artifact Registry
         env:
           GCP_REGION: ${{ secrets.GCP_REGION }}
@@ -218,6 +272,8 @@ jobs:
             FIRESTORE_PROJECT_ID=${{ secrets.FIRESTORE_PROJECT_ID }}
             META_ACCESS_TOKEN=${{ secrets.META_ACCESS_TOKEN }}
             MCP_API_KEY=${{ secrets.MCP_API_KEY }}
+          secrets: |
+            META_TOKENS=meta-tokens-prod:latest
 
       - name: Mask service URL in logs
         env:
@@ -230,21 +286,22 @@ jobs:
           HOST="${HOST#http://}"
           echo "::add-mask::${HOST}"
 
-      - name: Set SERVER_URL and META_TOKENS
+      - name: Set SERVER_URL on the new revision
         env:
           GCP_REGION: ${{ secrets.GCP_REGION }}
           SERVICE_URL: ${{ steps.deploy.outputs.url }}
-          META_TOKENS: ${{ secrets.META_TOKENS }}
         run: |
-          UPDATE_VARS="SERVER_URL=$SERVICE_URL"
-          if [ -n "$META_TOKENS" ]; then
-            UPDATE_VARS="$UPDATE_VARS||META_TOKENS=$META_TOKENS"
-          fi
+          # SERVER_URL isn't known until the deploy completes (Cloud Run
+          # assigns the hostname). META_TOKENS is no longer set here —
+          # it's injected from Secret Manager via the deploy step's
+          # `secrets:` parameter, which avoids the gcloud comma-delimiter
+          # issue that previously broke the JSON value into pieces and
+          # leaked a Meta token as an env var name.
           gcloud run services update "$SERVICE_NAME" \
             --region="$GCP_REGION" \
-            --update-env-vars="^||^$UPDATE_VARS" \
+            --update-env-vars="SERVER_URL=$SERVICE_URL" \
             --quiet > /dev/null 2>&1 || {
-              echo "Failed to update SERVER_URL / META_TOKENS env vars"
+              echo "Failed to update SERVER_URL env var"
               exit 1
             }
 
