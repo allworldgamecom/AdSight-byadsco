@@ -1,0 +1,257 @@
+import express from "express";
+import {
+  buildAuthorizeUrl,
+  exchangeCodeForToken,
+  exchangeForLongLivedToken,
+  fetchProfile,
+  loadMetaOAuthConfig,
+  validateToken,
+  type MetaOAuthConfig,
+} from "../auth/meta-oauth.js";
+import { isAllowed } from "../auth/email-allowlist.js";
+import { clearSession, getSession, setSession } from "../auth/session.js";
+import { signOAuthState, verifyOAuthState } from "../auth/oauth-state.js";
+import {
+  deleteToken,
+  getDefaultTokenName,
+  saveToken,
+  setDefaultToken,
+  upsertUser,
+} from "../store/meta-token-repo.js";
+import { logger } from "../utils/logger.js";
+
+function safeReturnTo(input: unknown): string {
+  if (typeof input !== "string") return "/authorize";
+  if (!input.startsWith("/")) return "/authorize";
+  if (input.startsWith("//")) return "/authorize";
+  return input;
+}
+
+function renderError(res: express.Response, status: number, message: string): void {
+  res.status(status).type("html").send(
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Auth error</title>
+    <style>body{background:#0f0f0f;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
+    .card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:2.5rem;max-width:420px;text-align:center}
+    h1{color:#fca5a5;margin:0 0 0.5rem}p{color:#aaa;margin:0}</style></head>
+    <body><div class="card"><h1>Auth error</h1><p>${escapeHtml(message)}</p></div></body></html>`,
+  );
+}
+
+function escapeHtml(raw: string): string {
+  return raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
+
+export interface AuthRoutesOptions {
+  serverUrl: URL;
+}
+
+function getMetaConfigOr500(
+  serverUrl: URL,
+  res: express.Response,
+): MetaOAuthConfig | null {
+  const config = loadMetaOAuthConfig(serverUrl);
+  if (!config) {
+    renderError(res, 500, "Meta OAuth is not configured on this server.");
+    return null;
+  }
+  return config;
+}
+
+export function mountAuthRoutes(
+  app: express.Application,
+  options: AuthRoutesOptions,
+): void {
+  const { serverUrl } = options;
+
+  app.get("/auth/meta", async (req, res) => {
+    const config = getMetaConfigOr500(serverUrl, res);
+    if (!config) return;
+
+    const returnTo = safeReturnTo(
+      typeof req.query.return === "string" ? req.query.return : req.originalUrl,
+    );
+    const state = await signOAuthState({ returnTo });
+
+    res.redirect(302, buildAuthorizeUrl(config, state));
+  });
+
+  app.get("/auth/meta/callback", async (req, res) => {
+    const config = getMetaConfigOr500(serverUrl, res);
+    if (!config) return;
+
+    const code = typeof req.query.code === "string" ? req.query.code : null;
+    const state = typeof req.query.state === "string" ? req.query.state : null;
+    const error = typeof req.query.error === "string" ? req.query.error : null;
+
+    if (error) {
+      renderError(res, 400, `Meta returned an error: ${error}`);
+      return;
+    }
+    if (!code || !state) {
+      renderError(res, 400, "Missing code or state in callback.");
+      return;
+    }
+
+    const pending = await verifyOAuthState(state);
+    if (!pending) {
+      renderError(res, 400, "Invalid or expired OAuth state.");
+      return;
+    }
+
+    try {
+      const shortLived = await exchangeCodeForToken(config, code);
+      const longLived = await exchangeForLongLivedToken(
+        config,
+        shortLived.accessToken,
+      );
+      const profile = await fetchProfile(longLived.accessToken, config.apiVersion);
+
+      if (!isAllowed({ email: profile.email, fbUserId: profile.id })) {
+        logger.warn(
+          { fbUserId: profile.id, email: profile.email },
+          "Meta login rejected by allowlist",
+        );
+        renderError(
+          res,
+          403,
+          "This Meta account is not allowed to use this server. Contact the administrator.",
+        );
+        return;
+      }
+
+      await upsertUser(profile.id, profile);
+      await saveToken({
+        fbUserId: profile.id,
+        name: "personal",
+        accessToken: longLived.accessToken,
+        kind: "user",
+        expiresAt: longLived.expiresAt,
+        metaUserId: profile.id,
+        metaUserName: profile.name,
+        setAsDefault: !(await getDefaultTokenName(profile.id)),
+      });
+
+      await setSession(res, {
+        fbUserId: profile.id,
+        email: profile.email,
+        name: profile.name,
+      });
+
+      res.redirect(302, safeReturnTo(pending.returnTo));
+    } catch (err) {
+      logger.error(
+        { error: err instanceof Error ? err.message : String(err) },
+        "Meta callback failed",
+      );
+      renderError(res, 500, "Login failed. Please try again.");
+    }
+  });
+
+  app.post("/auth/logout", (_req, res) => {
+    clearSession(res);
+    res.redirect(302, "/authorize");
+  });
+
+  app.post(
+    "/auth/select-token",
+    express.urlencoded({ extended: false }),
+    async (req, res) => {
+      const session = await getSession(req);
+      if (!session) {
+        res.status(401).json({ error: "Not authenticated" });
+        return;
+      }
+      const name = typeof req.body?.name === "string" ? req.body.name : null;
+      if (!name) {
+        res.status(400).json({ error: "Missing name" });
+        return;
+      }
+      const ok = await setDefaultToken(session.fbUserId, name);
+      if (!ok) {
+        res.status(404).json({ error: "Token not found" });
+        return;
+      }
+      const returnTo = safeReturnTo(req.body?.return);
+      res.redirect(302, returnTo);
+    },
+  );
+
+  app.post(
+    "/auth/register-system-token",
+    express.urlencoded({ extended: false }),
+    async (req, res) => {
+      const session = await getSession(req);
+      if (!session) {
+        res.status(401).json({ error: "Not authenticated" });
+        return;
+      }
+
+      const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+      const token =
+        typeof req.body?.access_token === "string"
+          ? req.body.access_token.trim()
+          : "";
+
+      if (!name || !/^[a-zA-Z0-9_-]{1,64}$/.test(name)) {
+        renderError(res, 400, "Invalid token name (1-64 chars: a-z, A-Z, 0-9, _, -).");
+        return;
+      }
+      if (!token || token.length < 10) {
+        renderError(res, 400, "Invalid access token.");
+        return;
+      }
+
+      const validation = await validateToken(token);
+      if (!validation.valid || !validation.profile) {
+        renderError(
+          res,
+          400,
+          `Token validation failed: ${validation.error ?? "unknown error"}`,
+        );
+        return;
+      }
+
+      await saveToken({
+        fbUserId: session.fbUserId,
+        name,
+        accessToken: token,
+        kind: "system_user",
+        expiresAt: null,
+        metaUserId: validation.profile.id,
+        metaUserName: validation.profile.name,
+      });
+
+      const returnTo = safeReturnTo(req.body?.return);
+      res.redirect(302, returnTo);
+    },
+  );
+
+  app.post(
+    "/auth/delete-token",
+    express.urlencoded({ extended: false }),
+    async (req, res) => {
+      const session = await getSession(req);
+      if (!session) {
+        res.status(401).json({ error: "Not authenticated" });
+        return;
+      }
+      const name = typeof req.body?.name === "string" ? req.body.name : null;
+      if (!name) {
+        res.status(400).json({ error: "Missing name" });
+        return;
+      }
+      const ok = await deleteToken(session.fbUserId, name);
+      if (!ok) {
+        res.status(404).json({ error: "Token not found" });
+        return;
+      }
+      const returnTo = safeReturnTo(req.body?.return);
+      res.redirect(302, returnTo);
+    },
+  );
+}

@@ -85,6 +85,9 @@ fi
 
 echo ""
 echo "==> Granting IAM roles..."
+# Note: roles/datastore.user is required by the Cloud Run runtime SA (not this
+# deploy SA) so the running service can read/write Firestore. Document this in
+# the README — it is granted to the runtime SA separately.
 for role in \
   roles/artifactregistry.writer \
   roles/run.developer \
@@ -96,6 +99,20 @@ for role in \
     --condition=None \
     --quiet > /dev/null
 done
+
+# ── Enable Firestore (Native mode, default database) ────────
+echo ""
+echo "==> Ensuring Firestore database (default, Native mode) exists..."
+gcloud services enable firestore.googleapis.com --quiet > /dev/null
+if gcloud firestore databases describe --database='(default)' 2>/dev/null > /dev/null; then
+  echo "    Firestore (default) already provisioned, skipping."
+else
+  gcloud firestore databases create \
+    --database='(default)' \
+    --location="${GCP_REGION}" \
+    --type=firestore-native \
+    --quiet > /dev/null || echo "    Could not auto-create Firestore database. Create it manually in the console (Native mode, default database)."
+fi
 
 # ── Create Workload Identity Federation Pool ────────────────
 

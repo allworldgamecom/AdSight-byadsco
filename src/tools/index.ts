@@ -50,7 +50,7 @@ export function registerAllTools(server: McpServer): void {
   registerInstagramTools(server);    // 2 tools — IG account & media lookup
 
   // ─── Token Management ────────────────────────────────────
-  registerTokenTools(server);        // 3 tools — Multi-token registry
+  registerTokenTools(server);        // 4 tools — list / set-active / register / delete
 
-  // Total: 79 tools
+  // Total: 80 tools
 }

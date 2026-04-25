@@ -1,0 +1,125 @@
+# gitleaks config for meta-ads-mcp.
+#
+# Extends the upstream default ruleset (AWS, GCP, GitHub, Stripe, Twilio,
+# Slack, etc.) with project-specific rules that catch leaks of the secrets
+# this server actually handles. See .env.example for the full list.
+#
+# Update CLAUDE.md and ~/.claude/skills/pre-deploy-guard/scripts/scan-secrets.sh
+# in tandem when adding rules here so the local guard and CI agree.
+
+title = "meta-ads-mcp gitleaks rules"
+
+[extend]
+useDefault = true
+
+# ──────────────────────────────────────────────────────────────────────
+# Project-specific rules
+# ──────────────────────────────────────────────────────────────────────
+
+[[rules]]
+id = "meta-app-secret-assignment"
+description = "Meta App Secret assigned to a META_APP_SECRET variable"
+regex = '''(?i)META_APP_SECRET\s*[:=]\s*["']?[A-Za-z0-9]{16,}["']?'''
+tags = ["meta", "secret"]
+
+[[rules]]
+id = "meta-access-token"
+description = "Meta long-lived access token (EAA prefix)"
+regex = '''EAA[A-Za-z0-9]{20,}'''
+tags = ["meta", "token"]
+
+[[rules]]
+id = "meta-tokens-json"
+description = "Meta multi-tenant tokens JSON map containing EAA tokens"
+regex = '''(?i)META_TOKENS\s*[:=]\s*["']?\{[^}]*EAA[A-Za-z0-9]{20,}'''
+tags = ["meta", "token"]
+
+[[rules]]
+id = "oauth-secret-assignment"
+description = "MCP OAuth signing secret"
+regex = '''(?i)OAUTH_SECRET\s*[:=]\s*["']?[A-Za-z0-9+/=]{32,}["']?'''
+tags = ["oauth", "secret"]
+
+[[rules]]
+id = "oauth-approval-pin"
+description = "MCP OAuth approval PIN"
+regex = '''(?i)OAUTH_APPROVAL_PIN\s*[:=]\s*["']?[A-Za-z0-9]{6,}["']?'''
+tags = ["oauth", "secret"]
+
+[[rules]]
+id = "session-cookie-secret"
+description = "Session cookie signing secret"
+regex = '''(?i)SESSION_COOKIE_SECRET\s*[:=]\s*["']?[A-Za-z0-9+/=]{32,}["']?'''
+tags = ["session", "secret"]
+
+[[rules]]
+id = "token-encryption-key"
+description = "AES-256-GCM key used to encrypt Meta tokens at rest (64 hex)"
+regex = '''(?i)TOKEN_ENCRYPTION_KEY\s*[:=]\s*["']?[A-Fa-f0-9]{64}["']?'''
+tags = ["encryption", "key"]
+
+[[rules]]
+id = "mcp-api-key-assignment"
+description = "MCP service-to-service API key"
+regex = '''(?i)MCP_API_KEY\s*[:=]\s*["']?[A-Za-z0-9]{20,}["']?'''
+tags = ["api", "key"]
+
+[[rules]]
+id = "google-oauth-token"
+description = "Google OAuth access token (ya29.<...>)"
+regex = '''ya29\.[0-9A-Za-z_-]{30,}'''
+tags = ["gcp", "token"]
+
+[[rules]]
+id = "google-api-key-meta-ads-mcp"
+description = "Google API key (AIza prefix)"
+regex = '''AIza[0-9A-Za-z_-]{35}'''
+tags = ["gcp", "key"]
+
+[[rules]]
+id = "gcp-service-account-private-key"
+description = "GCP service account JSON containing a private key"
+regex = '''"private_key"\s*:\s*"-----BEGIN'''
+tags = ["gcp", "key"]
+
+[[rules]]
+id = "private-key-block"
+description = "Generic private key block (RSA/EC/DSA/OpenSSH/PGP)"
+regex = '''-----BEGIN(\s+(RSA|EC|DSA|OPENSSH|PGP|ENCRYPTED))?\s+PRIVATE KEY-----'''
+tags = ["key", "pem"]
+
+# ──────────────────────────────────────────────────────────────────────
+# Allowlist
+# Excludes documented examples, test fixtures, and lockfiles where
+# default rules tend to false-positive on hashes/checksums.
+# ──────────────────────────────────────────────────────────────────────
+
+[allowlist]
+description = "global allowlist for documented examples and test fixtures"
+paths = [
+  '''^\.env\.example$''',
+  '''^\.gitleaks\.toml$''',
+  '''^package-lock\.json$''',
+  '''^pnpm-lock\.yaml$''',
+  '''^yarn\.lock$''',
+  '''^tests/.*\.(test|spec)\.[jt]sx?$''',
+  '''^tests/setup\.ts$''',
+  '''^tests/fixtures/''',
+  '''^CHANGELOG\.md$''',
+  '''^README\.md$''',
+  '''^CLAUDE\.md$''',
+  '''^AGENTS\.md$''',
+  '''^SECURITY\.md$''',
+  '''^CONTRIBUTING\.md$''',
+]
+regexes = [
+  # Common placeholder values used in docs and examples.
+  '''(?i)YOUR_(META|OAUTH|TOKEN|SESSION|MCP|API)_[A-Z_]+''',
+  '''(?i)EXAMPLE_(SECRET|KEY|TOKEN)''',
+  '''(?i)<your-[a-z-]+>''',
+  # Synthetic values used in tests — clearly not real secrets.
+  '''dummy[-_]?(token|secret|key)''',
+  '''test[-_]?(token|secret|key)''',
+  '''placeholder''',
+  '''PLACEHOLDER''',
+]

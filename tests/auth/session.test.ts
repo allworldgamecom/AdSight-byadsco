@@ -1,0 +1,112 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  clearSession,
+  getSession,
+  resetSecretCacheForTests,
+  setSession,
+  type SessionPayload,
+} from "../../src/auth/session.js";
+
+const SECRET = "x".repeat(40);
+const original = process.env.SESSION_COOKIE_SECRET;
+
+interface CookieCall {
+  name: string;
+  value: string;
+  options: Record<string, unknown>;
+}
+
+function makeRes() {
+  const cookieCalls: CookieCall[] = [];
+  const clearCalls: { name: string; options: Record<string, unknown> }[] = [];
+  return {
+    cookieCalls,
+    clearCalls,
+    cookie: vi.fn((name: string, value: string, options: Record<string, unknown>) => {
+      cookieCalls.push({ name, value, options });
+    }),
+    clearCookie: vi.fn(
+      (name: string, options: Record<string, unknown>) => {
+        clearCalls.push({ name, options });
+      },
+    ),
+  };
+}
+
+describe("session", () => {
+  beforeEach(() => {
+    process.env.SESSION_COOKIE_SECRET = SECRET;
+    resetSecretCacheForTests();
+  });
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.SESSION_COOKIE_SECRET;
+    else process.env.SESSION_COOKIE_SECRET = original;
+    resetSecretCacheForTests();
+  });
+
+  it("setSession sets a signed cookie with secure flags", async () => {
+    const res = makeRes();
+    const payload: SessionPayload = {
+      fbUserId: "1234",
+      email: "alice@x.com",
+      name: "Alice",
+    };
+
+    await setSession(res as never, payload);
+
+    expect(res.cookieCalls).toHaveLength(1);
+    const call = res.cookieCalls[0];
+    expect(call.name).toBe("mcp_session");
+    expect(call.options.httpOnly).toBe(true);
+    expect(call.options.sameSite).toBe("lax");
+    expect(typeof call.value).toBe("string");
+    expect(call.value.split(".")).toHaveLength(3);
+  });
+
+  it("getSession reads back the same payload", async () => {
+    const res = makeRes();
+    const payload: SessionPayload = {
+      fbUserId: "1234",
+      email: "alice@x.com",
+      name: "Alice",
+    };
+
+    await setSession(res as never, payload);
+    const cookie = res.cookieCalls[0].value;
+
+    const fakeReq = { cookies: { mcp_session: cookie } } as never;
+    const got = await getSession(fakeReq);
+    expect(got).toEqual(payload);
+  });
+
+  it("getSession returns null for missing or tampered cookies", async () => {
+    expect(await getSession({ cookies: {} } as never)).toBeNull();
+    expect(
+      await getSession({ cookies: { mcp_session: "garbage.tok.en" } } as never),
+    ).toBeNull();
+  });
+
+  it("rejects cookies signed with a different secret", async () => {
+    const res = makeRes();
+    await setSession(res as never, {
+      fbUserId: "1234",
+      email: null,
+      name: null,
+    });
+    const cookie = res.cookieCalls[0].value;
+
+    process.env.SESSION_COOKIE_SECRET = "y".repeat(40);
+    resetSecretCacheForTests();
+
+    const got = await getSession({ cookies: { mcp_session: cookie } } as never);
+    expect(got).toBeNull();
+  });
+
+  it("clearSession clears the cookie", () => {
+    const res = makeRes();
+    clearSession(res as never);
+    expect(res.clearCalls).toHaveLength(1);
+    expect(res.clearCalls[0].name).toBe("mcp_session");
+  });
+});

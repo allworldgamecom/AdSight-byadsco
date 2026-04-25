@@ -13,7 +13,47 @@ permissions:
   id-token: write   # Required for WIF OIDC token
 
 jobs:
+  preflight:
+    name: Preflight (lint, typecheck, test, build, secret scan)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        env:
+          CI: '1'
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
   deploy:
+    needs: preflight
     runs-on: ubuntu-latest
 
     steps:
@@ -22,16 +62,29 @@ jobs:
 
       - name: Validate required production secrets
         env:
-          OAUTH_APPROVAL_PIN: ${{ secrets.OAUTH_APPROVAL_PIN }}
           OAUTH_SECRET: ${{ secrets.OAUTH_SECRET }}
+          TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          SESSION_COOKIE_SECRET: ${{ secrets.SESSION_COOKIE_SECRET }}
+          META_APP_ID: ${{ secrets.META_APP_ID }}
+          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+          AUTH_ALLOWED_EMAILS: ${{ secrets.AUTH_ALLOWED_EMAILS }}
+          AUTH_ALLOWED_DOMAINS: ${{ secrets.AUTH_ALLOWED_DOMAINS }}
+          AUTH_ALLOWED_FB_USER_IDS: ${{ secrets.AUTH_ALLOWED_FB_USER_IDS }}
         run: |
-          if [ -z "${OAUTH_APPROVAL_PIN}" ]; then
-            echo "Missing required secret: OAUTH_APPROVAL_PIN"
+          missing=()
+          [ -z "${OAUTH_SECRET}" ]           && missing+=("OAUTH_SECRET")
+          [ -z "${TOKEN_ENCRYPTION_KEY}" ]   && missing+=("TOKEN_ENCRYPTION_KEY")
+          [ -z "${SESSION_COOKIE_SECRET}" ]  && missing+=("SESSION_COOKIE_SECRET")
+          [ -z "${META_APP_ID}" ]            && missing+=("META_APP_ID")
+          [ -z "${META_APP_SECRET}" ]        && missing+=("META_APP_SECRET")
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "Missing required secrets: ${missing[*]}"
             exit 1
           fi
-
-          if [ -z "${OAUTH_SECRET}" ]; then
-            echo "Missing required secret: OAUTH_SECRET"
+          if [ -z "${AUTH_ALLOWED_EMAILS}" ] \
+             && [ -z "${AUTH_ALLOWED_DOMAINS}" ] \
+             && [ -z "${AUTH_ALLOWED_FB_USER_IDS}" ]; then
+            echo "At least one of AUTH_ALLOWED_EMAILS / AUTH_ALLOWED_DOMAINS / AUTH_ALLOWED_FB_USER_IDS must be set"
             exit 1
           fi
 
@@ -84,9 +137,28 @@ jobs:
             META_API_VERSION=v22.0
             LOG_LEVEL=info
             NODE_ENV=production
-            META_ACCESS_TOKEN=${{ secrets.META_ACCESS_TOKEN }}
             OAUTH_SECRET=${{ secrets.OAUTH_SECRET }}
-            OAUTH_APPROVAL_PIN=${{ secrets.OAUTH_APPROVAL_PIN }}
+            TOKEN_ENCRYPTION_KEY=${{ secrets.TOKEN_ENCRYPTION_KEY }}
+            SESSION_COOKIE_SECRET=${{ secrets.SESSION_COOKIE_SECRET }}
+            META_APP_ID=${{ secrets.META_APP_ID }}
+            META_APP_SECRET=${{ secrets.META_APP_SECRET }}
+            AUTH_ALLOWED_EMAILS=${{ secrets.AUTH_ALLOWED_EMAILS }}
+            AUTH_ALLOWED_DOMAINS=${{ secrets.AUTH_ALLOWED_DOMAINS }}
+            AUTH_ALLOWED_FB_USER_IDS=${{ secrets.AUTH_ALLOWED_FB_USER_IDS }}
+            FIRESTORE_PROJECT_ID=${{ secrets.FIRESTORE_PROJECT_ID }}
+            META_ACCESS_TOKEN=${{ secrets.META_ACCESS_TOKEN }}
+            MCP_API_KEY=${{ secrets.MCP_API_KEY }}
+
+      - name: Mask service URL in logs
+        env:
+          SERVICE_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          # Register the URL (and its bare host) as secrets so any subsequent
+          # step that accidentally prints it gets auto-redacted by Actions.
+          echo "::add-mask::${SERVICE_URL}"
+          HOST="${SERVICE_URL#https://}"
+          HOST="${HOST#http://}"
+          echo "::add-mask::${HOST}"
 
       - name: Set SERVER_URL and META_TOKENS
         env:
@@ -100,19 +172,20 @@ jobs:
           fi
           gcloud run services update "$SERVICE_NAME" \
             --region="$GCP_REGION" \
-            --update-env-vars="^||^$UPDATE_VARS"
+            --update-env-vars="^||^$UPDATE_VARS" \
+            --quiet > /dev/null 2>&1 || {
+              echo "Failed to update SERVER_URL / META_TOKENS env vars"
+              exit 1
+            }
 
-      - name: Smoke test
+      - name: Smoke test (URL stays masked in logs)
         env:
           SERVICE_URL: ${{ steps.deploy.outputs.url }}
         run: |
-          echo "Service URL: ${SERVICE_URL}"
-
-          # Wait for new revision to be ready after env var update
+          # Wait for new revision to roll out
           sleep 5
 
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/health" --max-time 10)
-
           if [ "${STATUS}" = "200" ]; then
             echo "Health check passed (HTTP ${STATUS})"
           else
@@ -120,9 +193,7 @@ jobs:
             exit 1
           fi
 
-          # Verify OAuth metadata is available
           OAUTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/.well-known/oauth-authorization-server" --max-time 10)
-
           if [ "${OAUTH_STATUS}" = "200" ]; then
             echo "OAuth metadata check passed (HTTP ${OAUTH_STATUS})"
           else

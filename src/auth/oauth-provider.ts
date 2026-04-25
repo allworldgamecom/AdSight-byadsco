@@ -13,8 +13,11 @@ import type {
   OAuthTokenRevocationRequest,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { logger } from "../utils/logger.js";
-
-// ── JWT Secret ──────────────────────────────────────────────
+import {
+  InMemoryAuthCodesStore,
+  type AuthCodesStore,
+} from "../store/persistent-auth-codes.js";
+import { InMemoryClientsStore } from "../store/persistent-clients-store.js";
 
 let cachedSecret: Uint8Array | undefined;
 
@@ -38,72 +41,28 @@ function getJwtSecret(): Uint8Array {
   return cachedSecret;
 }
 
-// ── Auth Code Store ─────────────────────────────────────────
-
-interface AuthCodeEntry {
-  clientId: string;
-  codeChallenge: string;
-  redirectUri: string;
-  resource?: URL;
-  expiresAt: number;
+export interface PendingAuthSession {
+  fbUserId: string;
+  metaTokenName: string;
 }
-
-// ── Clients Store ───────────────────────────────────────────
-
-const MAX_REGISTERED_CLIENTS = 100;
-
-class InMemoryClientsStore implements OAuthRegisteredClientsStore {
-  private clients = new Map<string, OAuthClientInformationFull>();
-
-  async getClient(clientId: string): Promise<OAuthClientInformationFull | undefined> {
-    return this.clients.get(clientId);
-  }
-
-  async registerClient(
-    client: OAuthClientInformationFull,
-  ): Promise<OAuthClientInformationFull> {
-    // Prevent unbounded client registration (DoS protection)
-    if (this.clients.size >= MAX_REGISTERED_CLIENTS && !this.clients.has(client.client_id)) {
-      throw new Error("Maximum number of registered clients reached");
-    }
-    this.clients.set(client.client_id, client);
-    logger.info(
-      { clientId: client.client_id, clientName: client.client_name },
-      "Registered OAuth client",
-    );
-    return client;
-  }
-}
-
-// ── OAuth Server Provider ───────────────────────────────────
-
-const AUTH_CODE_MAX = 50;
 
 export class MetaAdsOAuthProvider implements OAuthServerProvider {
-  private readonly _clientsStore = new InMemoryClientsStore();
-  private readonly authCodes = new Map<string, AuthCodeEntry>();
+  private clientsStoreImpl: OAuthRegisteredClientsStore = new InMemoryClientsStore();
+  private authCodesImpl: AuthCodesStore = new InMemoryAuthCodesStore();
+  private pendingAuthResolver: () => PendingAuthSession | null = () => null;
 
-  constructor() {
-    // Clean expired auth codes every 5 minutes to prevent memory leaks
-    setInterval(() => this.cleanExpiredCodes(), 5 * 60 * 1000).unref();
-  }
-
-  private cleanExpiredCodes(): void {
-    const now = Math.floor(Date.now() / 1000);
-    let cleaned = 0;
-    for (const [code, entry] of this.authCodes) {
-      if (entry.expiresAt < now) {
-        this.authCodes.delete(code);
-        cleaned++;
-      }
-    }
-    if (cleaned > 0) {
-      logger.debug({ cleaned }, "Cleaned expired authorization codes");
-    }
+  configure(opts: {
+    clientsStore?: OAuthRegisteredClientsStore;
+    authCodesStore?: AuthCodesStore;
+    resolvePendingAuth?: () => PendingAuthSession | null;
+  }): void {
+    if (opts.clientsStore) this.clientsStoreImpl = opts.clientsStore;
+    if (opts.authCodesStore) this.authCodesImpl = opts.authCodesStore;
+    if (opts.resolvePendingAuth) this.pendingAuthResolver = opts.resolvePendingAuth;
   }
 
   get clientsStore(): OAuthRegisteredClientsStore {
-    return this._clientsStore;
+    return this.clientsStoreImpl;
   }
 
   async authorize(
@@ -111,22 +70,17 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
     params: AuthorizationParams,
     res: Response,
   ): Promise<void> {
-    // Prevent memory exhaustion from too many pending auth codes
-    if (this.authCodes.size >= AUTH_CODE_MAX) {
-      this.cleanExpiredCodes();
-    }
-    if (this.authCodes.size >= AUTH_CODE_MAX) {
-      throw new Error("Too many pending authorization requests");
-    }
-
     const code = crypto.randomBytes(32).toString("hex");
+    const pending = this.pendingAuthResolver();
 
-    this.authCodes.set(code, {
+    await this.authCodesImpl.set(code, {
       clientId: client.client_id,
       codeChallenge: params.codeChallenge,
       redirectUri: params.redirectUri,
-      resource: params.resource,
-      expiresAt: Math.floor(Date.now() / 1000) + 600, // 10 minutes
+      resource: params.resource?.href,
+      fbUserId: pending?.fbUserId,
+      metaTokenName: pending?.metaTokenName,
+      expiresAt: Math.floor(Date.now() / 1000) + 600,
     });
 
     const redirectUrl = new URL(params.redirectUri);
@@ -135,7 +89,10 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
       redirectUrl.searchParams.set("state", params.state);
     }
 
-    logger.info({ clientId: client.client_id }, "Authorization code issued");
+    logger.info(
+      { clientId: client.client_id, fbUserId: pending?.fbUserId ?? null },
+      "Authorization code issued",
+    );
     res.redirect(302, redirectUrl.toString());
   }
 
@@ -143,7 +100,7 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
     client: OAuthClientInformationFull,
     authorizationCode: string,
   ): Promise<string> {
-    const entry = this.authCodes.get(authorizationCode);
+    const entry = await this.authCodesImpl.get(authorizationCode);
     if (!entry) {
       throw new Error("Invalid authorization code");
     }
@@ -151,7 +108,7 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
       throw new Error("Authorization code was issued to a different client");
     }
     if (entry.expiresAt < Math.floor(Date.now() / 1000)) {
-      this.authCodes.delete(authorizationCode);
+      await this.authCodesImpl.delete(authorizationCode);
       throw new Error("Authorization code has expired");
     }
     return entry.codeChallenge;
@@ -164,13 +121,12 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
     _redirectUri?: string,
     resource?: URL,
   ): Promise<OAuthTokens> {
-    const entry = this.authCodes.get(authorizationCode);
+    const entry = await this.authCodesImpl.get(authorizationCode);
     if (!entry) {
       throw new Error("Invalid authorization code");
     }
 
-    // Consume code (one-time use)
-    this.authCodes.delete(authorizationCode);
+    await this.authCodesImpl.delete(authorizationCode);
 
     if (entry.clientId !== client.client_id) {
       throw new Error("Authorization code was issued to a different client");
@@ -179,7 +135,13 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
       throw new Error("Authorization code has expired");
     }
 
-    return this.generateTokens(client.client_id, resource);
+    return this.generateTokens({
+      clientId: client.client_id,
+      resource:
+        resource ?? (entry.resource ? new URL(entry.resource) : undefined),
+      fbUserId: entry.fbUserId,
+      metaTokenName: entry.metaTokenName,
+    });
   }
 
   async exchangeRefreshToken(
@@ -201,7 +163,16 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
       throw new Error("Refresh token was issued to a different client");
     }
 
-    return this.generateTokens(client.client_id, resource);
+    return this.generateTokens({
+      clientId: client.client_id,
+      resource,
+      fbUserId:
+        typeof payload.fb_user_id === "string" ? payload.fb_user_id : undefined,
+      metaTokenName:
+        typeof payload.meta_token_name === "string"
+          ? payload.meta_token_name
+          : undefined,
+    });
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
@@ -215,11 +186,20 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
       throw new Error("Token is not an access token");
     }
 
+    const extra: Record<string, unknown> = {};
+    if (typeof payload.fb_user_id === "string") {
+      extra.fbUserId = payload.fb_user_id;
+    }
+    if (typeof payload.meta_token_name === "string") {
+      extra.metaTokenName = payload.meta_token_name;
+    }
+
     const authInfo: AuthInfo = {
       token,
       clientId: payload.sub!,
       scopes: [],
       expiresAt: payload.exp,
+      extra: Object.keys(extra).length > 0 ? extra : undefined,
     };
     if (payload.resource) {
       authInfo.resource = new URL(payload.resource as string);
@@ -231,36 +211,49 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
     _client: OAuthClientInformationFull,
     _request: OAuthTokenRevocationRequest,
   ): Promise<void> {
-    // JWTs are stateless — revocation is a no-op (token expires naturally)
     logger.debug("Token revocation requested (no-op for stateless JWTs)");
   }
 
-  // ── Internal helpers ────────────────────────────────────
-
-  private async generateTokens(clientId: string, resource?: URL): Promise<OAuthTokens> {
+  private async generateTokens(input: {
+    clientId: string;
+    resource?: URL;
+    fbUserId?: string;
+    metaTokenName?: string;
+  }): Promise<OAuthTokens> {
     const secret = getJwtSecret();
     const now = Math.floor(Date.now() / 1000);
 
-    const accessToken = await new SignJWT({
-      sub: clientId,
+    const claims: Record<string, unknown> = {
+      sub: input.clientId,
       type: "access",
-      ...(resource && { resource: resource.href }),
-    })
+    };
+    if (input.resource) claims.resource = input.resource.href;
+    if (input.fbUserId) claims.fb_user_id = input.fbUserId;
+    if (input.metaTokenName) claims.meta_token_name = input.metaTokenName;
+
+    const accessToken = await new SignJWT(claims)
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt(now)
-      .setExpirationTime(now + 3600) // 1 hour
+      .setExpirationTime(now + 3600)
       .sign(secret);
 
-    const refreshToken = await new SignJWT({
-      sub: clientId,
+    const refreshClaims: Record<string, unknown> = {
+      sub: input.clientId,
       type: "refresh",
-    })
+    };
+    if (input.fbUserId) refreshClaims.fb_user_id = input.fbUserId;
+    if (input.metaTokenName) refreshClaims.meta_token_name = input.metaTokenName;
+
+    const refreshToken = await new SignJWT(refreshClaims)
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt(now)
-      .setExpirationTime(now + 30 * 24 * 3600) // 30 days
+      .setExpirationTime(now + 30 * 24 * 3600)
       .sign(secret);
 
-    logger.info({ clientId }, "Tokens issued");
+    logger.info(
+      { clientId: input.clientId, fbUserId: input.fbUserId ?? null },
+      "Tokens issued",
+    );
 
     return {
       access_token: accessToken,
@@ -271,4 +264,13 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
   }
 }
 
-export const oauthProvider = new MetaAdsOAuthProvider();
+export const oauthProvider: MetaAdsOAuthProvider = new MetaAdsOAuthProvider();
+
+export function resetOAuthProviderForTests(): void {
+  cachedSecret = undefined;
+  oauthProvider.configure({
+    clientsStore: new InMemoryClientsStore(),
+    authCodesStore: new InMemoryAuthCodesStore(),
+    resolvePendingAuth: () => null,
+  });
+}
