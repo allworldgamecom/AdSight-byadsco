@@ -50,7 +50,8 @@ gcloud services enable \
   artifactregistry.googleapis.com \
   iam.googleapis.com \
   iamcredentials.googleapis.com \
-  cloudresourcemanager.googleapis.com
+  cloudresourcemanager.googleapis.com \
+  secretmanager.googleapis.com
 
 # ── Create Artifact Registry repository ─────────────────────
 
@@ -88,10 +89,17 @@ echo "==> Granting IAM roles..."
 # Note: roles/datastore.user is required by the Cloud Run runtime SA (not this
 # deploy SA) so the running service can read/write Firestore. Document this in
 # the README — it is granted to the runtime SA separately.
+#
+# roles/secretmanager.admin lets the deploy workflow bootstrap the
+# `meta-tokens-prod` Secret Manager entry on first run (and grant the runtime
+# SA `secretAccessor` on it). Without this role the deploy fails at the
+# `Sync META_TOKENS to Secret Manager` step with `secretmanager.secrets.create`
+# IAM_PERMISSION_DENIED.
 for role in \
   roles/artifactregistry.writer \
   roles/run.developer \
-  roles/iam.serviceAccountUser; do
+  roles/iam.serviceAccountUser \
+  roles/secretmanager.admin; do
   echo "    ${role}"
   gcloud projects add-iam-policy-binding "${GCP_PROJECT_ID}" \
     --member="serviceAccount:${SA_EMAIL}" \
