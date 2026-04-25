@@ -1,6 +1,7 @@
-import crypto from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
@@ -9,10 +10,32 @@ import { oauthProvider } from "../auth/oauth-provider.js";
 import { isApiKeyConfigured, validateApiKey } from "../auth/api-key.js";
 import { requestContext } from "../auth/token-store.js";
 import { tokenManager } from "../auth/token-manager.js";
+import { getSession } from "../auth/session.js";
 import { resolveSecurityConfig } from "./security-config.js";
+import { mountAuthRoutes } from "./auth-routes.js";
+import {
+  FirestoreClientsStore,
+  InMemoryClientsStore,
+} from "../store/persistent-clients-store.js";
+import {
+  FirestoreAuthCodesStore,
+  InMemoryAuthCodesStore,
+} from "../store/persistent-auth-codes.js";
+import {
+  getDecryptedToken,
+  getDefaultTokenName,
+  listTokens,
+  setDefaultToken,
+} from "../store/meta-token-repo.js";
+import { isFirestoreEnabled } from "../store/firestore.js";
 import { logger } from "../utils/logger.js";
 
-// ── Helpers ──────────────────────────────────────────────────
+interface PendingAuth {
+  fbUserId: string;
+  metaTokenName: string;
+}
+
+const pendingAuthStorage = new AsyncLocalStorage<PendingAuth>();
 
 function escapeHtml(raw: string): string {
   return raw
@@ -25,174 +48,167 @@ function escapeHtml(raw: string): string {
 
 function getServerUrl(): URL {
   const envUrl = process.env.SERVER_URL;
-  if (envUrl) {
-    return new URL(envUrl);
-  }
+  if (envUrl) return new URL(envUrl);
   const port = process.env.PORT || "3000";
   return new URL(`http://localhost:${port}`);
 }
 
-interface ConsentPageOptions {
-  error?: string;
-  pinRequired?: boolean;
-  rateLimited?: boolean;
+interface ConsentContext {
+  query: Record<string, string>;
+  user: { fbUserId: string; email: string | null; name: string | null };
+  tokens: Awaited<ReturnType<typeof listTokens>>;
+  activeName: string | null;
 }
 
-function renderConsentPage(
-  query: Record<string, string>,
-  options: ConsentPageOptions = {},
-): string {
-  const clientId = escapeHtml(query.client_id || "Unknown");
-  const hiddenFields = Object.entries(query)
+function renderConsentPage(ctx: ConsentContext): string {
+  const clientId = escapeHtml(ctx.query.client_id || "Unknown");
+  const hiddenFields = Object.entries(ctx.query)
     .map(
       ([k, v]) =>
         `<input type="hidden" name="${escapeHtml(k)}" value="${escapeHtml(v)}" />`,
     )
     .join("\n        ");
 
-  const errorHtml = options.rateLimited
-    ? `<div class="error">Too many failed attempts. Please try again later.</div>`
-    : options.error
-      ? `<div class="error">${escapeHtml(options.error)}</div>`
-      : "";
+  const fullPath = "/authorize?" + new URLSearchParams(ctx.query).toString();
+  const returnHidden = `<input type="hidden" name="return" value="${escapeHtml(fullPath)}" />`;
 
-  const pinFieldHtml = options.pinRequired
-    ? `<div class="pin-group">
-          <label for="approval_pin">Approval PIN</label>
-          <input type="password" id="approval_pin" name="approval_pin"
-                 placeholder="Enter PIN to approve" required autocomplete="off" />
-        </div>`
-    : "";
+  const tokenOptions =
+    ctx.tokens.length > 0
+      ? ctx.tokens
+          .map((t) => {
+            const checked = t.name === ctx.activeName ? "checked" : "";
+            const expiry =
+              t.kind === "system_user"
+                ? "no expira"
+                : t.expiresAt
+                  ? `${Math.max(0, Math.ceil((t.expiresAt - Date.now() / 1000) / 86400))} días`
+                  : "—";
+            const expired = t.isExpired
+              ? '<span class="badge badge-warn">expirado</span>'
+              : "";
+            const kind = t.kind === "system_user" ? "system" : "personal";
+            return `<label class="token-row${t.name === ctx.activeName ? " active" : ""}">
+              <input type="radio" name="token" value="${escapeHtml(t.name)}" ${checked} form="approve-form" />
+              <span class="token-name">${escapeHtml(t.name)}</span>
+              <span class="badge">${kind}</span>
+              ${expired}
+              <span class="token-expiry">${expiry}</span>
+            </label>`;
+          })
+          .join("\n")
+      : `<p class="no-tokens">No hay tokens conectados. Pega un System User token abajo o cierra sesión y vuelve a iniciar.</p>`;
+
+  const userInitials = (ctx.user.name ?? ctx.user.email ?? "?")
+    .split(/\s+/)
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Authorize — Meta Ads MCP</title>
+  <title>Autorizar — Meta Ads MCP</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #0f0f0f; color: #e0e0e0; display: flex; justify-content: center;
-      align-items: center; min-height: 100vh; padding: 1rem; }
-    .card { background: #1a1a1a; border: 1px solid #333; border-radius: 12px;
-      padding: 2.5rem; max-width: 420px; width: 100%; text-align: center; }
-    h1 { font-size: 1.4rem; margin-bottom: 0.5rem; color: #fff; }
-    .subtitle { color: #888; margin-bottom: 2rem; font-size: 0.95rem; }
-    .client { color: #6cb4ee; font-weight: 600; }
-    .permissions { text-align: left; background: #111; border-radius: 8px;
-      padding: 1rem 1.25rem; margin-bottom: 2rem; }
-    .permissions li { margin: 0.4rem 0; color: #aaa; font-size: 0.9rem; }
-    .pin-group { text-align: left; margin-bottom: 1.5rem; }
-    .pin-group label { display: block; color: #aaa; font-size: 0.85rem;
-      margin-bottom: 0.4rem; }
-    .pin-group input { width: 100%; padding: 0.6rem 0.75rem; border: 1px solid #444;
-      border-radius: 6px; background: #111; color: #e0e0e0; font-size: 1rem;
-      outline: none; }
-    .pin-group input:focus { border-color: #2563eb; }
-    .error { background: #3b1111; border: 1px solid #7f1d1d; border-radius: 8px;
-      padding: 0.75rem 1rem; margin-bottom: 1.25rem; color: #fca5a5;
-      font-size: 0.9rem; text-align: left; }
-    button { width: 100%; padding: 0.75rem; border: none; border-radius: 8px;
-      font-size: 1rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
-    .approve { background: #2563eb; color: #fff; margin-bottom: 0.75rem; }
-    .approve:hover { background: #1d4ed8; }
-    .deny { background: #333; color: #ccc; }
-    .deny:hover { background: #444; }
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f0f0f;color:#e0e0e0;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:1rem}
+    .card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:2rem;max-width:520px;width:100%}
+    .user{display:flex;align-items:center;gap:0.75rem;padding-bottom:1rem;border-bottom:1px solid #2a2a2a;margin-bottom:1.5rem}
+    .avatar{width:40px;height:40px;border-radius:50%;background:#2563eb;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600}
+    .user-info{flex:1;min-width:0}
+    .user-name{color:#fff;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .user-email{color:#888;font-size:0.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .logout{background:transparent;border:1px solid #333;color:#888;padding:0.4rem 0.75rem;border-radius:6px;font-size:0.8rem;cursor:pointer}
+    .logout:hover{border-color:#555;color:#ccc}
+    h1{font-size:1.3rem;color:#fff;margin-bottom:0.5rem}
+    .subtitle{color:#888;margin-bottom:1.5rem;font-size:0.95rem}
+    .client{color:#6cb4ee;font-weight:600}
+    .section{margin-bottom:1.5rem}
+    .section-title{color:#aaa;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem}
+    .permissions{background:#111;border-radius:8px;padding:0.75rem 1rem}
+    .permissions li{margin:0.3rem 0;color:#aaa;font-size:0.9rem;list-style:none}
+    .token-row{display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.75rem;background:#111;border:1px solid #2a2a2a;border-radius:6px;margin-bottom:0.4rem;cursor:pointer}
+    .token-row.active{border-color:#2563eb}
+    .token-name{flex:1;color:#e0e0e0;font-size:0.9rem;font-weight:500}
+    .token-expiry{color:#666;font-size:0.8rem}
+    .badge{background:#222;color:#888;padding:0.1rem 0.4rem;border-radius:4px;font-size:0.7rem;text-transform:uppercase}
+    .badge-warn{background:#3b1111;color:#fca5a5}
+    .no-tokens{color:#888;background:#111;border-radius:8px;padding:1rem;text-align:center;font-size:0.9rem}
+    details{background:#111;border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem}
+    details summary{cursor:pointer;color:#6cb4ee;font-size:0.9rem}
+    details[open] summary{margin-bottom:0.75rem}
+    details input[type="text"],details input[type="password"]{width:100%;padding:0.5rem 0.75rem;background:#0a0a0a;border:1px solid #333;border-radius:6px;color:#e0e0e0;margin-bottom:0.5rem}
+    details button{padding:0.5rem 1rem;background:#333;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem}
+    details button:hover{background:#444}
+    button.approve,button.deny{width:100%;padding:0.75rem;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;margin-top:0.5rem}
+    .approve{background:#2563eb;color:#fff}
+    .approve:hover{background:#1d4ed8}
+    .approve:disabled{background:#444;cursor:not-allowed}
+    .deny{background:#222;color:#aaa}
+    .deny:hover{background:#333}
+    .inline{display:inline}
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>Authorize Meta Ads MCP</h1>
+    <div class="user">
+      <div class="avatar">${escapeHtml(userInitials || "U")}</div>
+      <div class="user-info">
+        <div class="user-name">${escapeHtml(ctx.user.name ?? "Usuario Meta")}</div>
+        <div class="user-email">${escapeHtml(ctx.user.email ?? ctx.user.fbUserId)}</div>
+      </div>
+      <form method="POST" action="/auth/logout" class="inline">
+        <button type="submit" class="logout">Salir</button>
+      </form>
+    </div>
+
+    <h1>Autorizar Meta Ads MCP</h1>
     <p class="subtitle">
-      <span class="client">${clientId}</span> wants to access your Meta Ads MCP server.
+      <span class="client">${clientId}</span> quiere acceder a tu servidor Meta Ads MCP.
     </p>
-    <ul class="permissions">
-      <li>Read and manage Meta ad accounts</li>
-      <li>Create, update, and pause campaigns</li>
-      <li>Access reporting and insights</li>
-    </ul>
-    ${errorHtml}
-    <form method="POST" action="/authorize">
-        ${hiddenFields}
-        ${pinFieldHtml}
-        <button type="submit" class="approve"${options.rateLimited ? " disabled" : ""}>Approve</button>
+
+    <div class="section">
+      <div class="section-title">Permisos solicitados</div>
+      <ul class="permissions">
+        <li>• Leer y gestionar cuentas publicitarias de Meta</li>
+        <li>• Crear, actualizar y pausar campañas</li>
+        <li>• Acceder a reportes e insights</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Token activo de Meta</div>
+      ${tokenOptions}
+    </div>
+
+    <details>
+      <summary>Registrar System User token (no caduca)</summary>
+      <form method="POST" action="/auth/register-system-token">
+        ${returnHidden}
+        <input type="text" name="name" placeholder="Nombre (ej. byads, client_acme)" required maxlength="64" pattern="[a-zA-Z0-9_-]{1,64}" />
+        <input type="password" name="access_token" placeholder="Pega el System User access token" required minlength="10" autocomplete="off" />
+        <button type="submit">Validar y guardar</button>
+      </form>
+    </details>
+
+    <form id="approve-form" method="POST" action="/authorize">
+      ${hiddenFields}
+      <button type="submit" class="approve" ${ctx.tokens.length === 0 ? "disabled" : ""}>
+        ${ctx.tokens.length === 0 ? "Conecta un token primero" : "Aprobar"}
+      </button>
     </form>
-    <form method="GET" action="${escapeHtml(query.redirect_uri || "/")}">
-        <input type="hidden" name="error" value="access_denied" />
-        ${query.state ? `<input type="hidden" name="state" value="${escapeHtml(query.state)}" />` : ""}
-        <button type="submit" class="deny">Deny</button>
+    <form method="GET" action="${escapeHtml(ctx.query.redirect_uri || "/")}">
+      <input type="hidden" name="error" value="access_denied" />
+      ${ctx.query.state ? `<input type="hidden" name="state" value="${escapeHtml(ctx.query.state)}" />` : ""}
+      <button type="submit" class="deny">Denegar</button>
     </form>
   </div>
 </body>
 </html>`;
 }
-
-// ── PIN authentication helpers ──────────────────────────────
-
-interface RateLimitEntry {
-  attempts: number;
-  lockedUntil: number;
-}
-
-const PIN_MAX_ATTEMPTS = 5;
-const PIN_LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
-const pinRateLimits = new Map<string, RateLimitEntry>();
-
-/** Clean expired rate-limit entries every 15 minutes to prevent memory leaks. */
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of pinRateLimits) {
-    if (entry.lockedUntil > 0 && entry.lockedUntil < now) {
-      pinRateLimits.delete(ip); // Lockout expired
-    } else if (entry.lockedUntil === 0) {
-      pinRateLimits.delete(ip); // Sub-threshold failures with no lockout
-    }
-  }
-}, PIN_LOCKOUT_MS).unref();
-
-function isPinRateLimited(ip: string): boolean {
-  const entry = pinRateLimits.get(ip);
-  if (!entry) return false;
-  if (entry.lockedUntil > Date.now()) return true;
-  // Lockout expired — reset
-  if (entry.attempts >= PIN_MAX_ATTEMPTS) {
-    entry.attempts = 0;
-    entry.lockedUntil = 0;
-  }
-  return false;
-}
-
-function recordPinFailure(ip: string): void {
-  const entry = pinRateLimits.get(ip) ?? { attempts: 0, lockedUntil: 0 };
-  entry.attempts += 1;
-  if (entry.attempts >= PIN_MAX_ATTEMPTS) {
-    entry.lockedUntil = Date.now() + PIN_LOCKOUT_MS;
-    logger.warn({ ip, attempts: entry.attempts }, "PIN rate limit lockout triggered");
-  }
-  pinRateLimits.set(ip, entry);
-}
-
-function resetPinFailures(ip: string): void {
-  pinRateLimits.delete(ip);
-}
-
-function verifyPin(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided, "utf-8");
-  const b = Buffer.from(expected, "utf-8");
-  // Pad to equal length to avoid leaking length info via timing
-  const maxLen = Math.max(a.length, b.length, 1);
-  const aPadded = Buffer.alloc(maxLen);
-  const bPadded = Buffer.alloc(maxLen);
-  a.copy(aPadded);
-  b.copy(bPadded);
-  // Bitwise AND avoids short-circuit timing side-channel
-  const contentMatch = crypto.timingSafeEqual(aPadded, bPadded) ? 1 : 0;
-  const lengthMatch = a.length === b.length ? 1 : 0;
-  return (contentMatch & lengthMatch) === 1;
-}
-
-// ── Generic endpoint rate limiter ────────────────────────────
 
 function createRateLimiter(maxRequests: number, windowMs: number) {
   const requests = new Map<string, { count: number; resetAt: number }>();
@@ -226,51 +242,23 @@ function createRateLimiter(maxRequests: number, windowMs: number) {
   };
 }
 
-// ── API Key auth middleware ──────────────────────────────────
-
-/**
- * Extract an API key from the request, checking X-API-Key header first,
- * then falling back to Authorization: Bearer <token> if it matches
- * the configured MCP_API_KEY.
- */
 function extractApiKey(req: express.Request): string | undefined {
-  // Prefer explicit X-API-Key header
   const xApiKey = req.headers["x-api-key"];
-  if (typeof xApiKey === "string" && xApiKey) {
-    return xApiKey;
-  }
-
-  // Fall back to Bearer token if it matches the API key
+  if (typeof xApiKey === "string" && xApiKey) return xApiKey;
   const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith("Bearer ")) {
-    return authHeader.slice(7);
-  }
-
+  if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
   return undefined;
 }
 
-/**
- * Combined auth middleware that supports both API key and OAuth 2.1.
- *
- * When MCP_API_KEY is configured:
- *   - X-API-Key header → validate as API key
- *   - Bearer token that matches MCP_API_KEY → authenticate as API key
- *   - Bearer token that does NOT match → fall through to OAuth
- *
- * When MCP_API_KEY is NOT configured:
- *   - Always delegate to OAuth bearer auth
- */
 function createCombinedAuthMiddleware(
   oauthMiddleware: express.RequestHandler,
 ): express.RequestHandler {
   return (req, res, next) => {
-    // If API key auth is not configured, always use OAuth
     if (!isApiKeyConfigured()) {
       oauthMiddleware(req, res, next);
       return;
     }
 
-    // Check X-API-Key header first (explicit API key)
     const xApiKey = req.headers["x-api-key"];
     if (typeof xApiKey === "string" && xApiKey) {
       if (validateApiKey(xApiKey)) {
@@ -286,7 +274,6 @@ function createCombinedAuthMiddleware(
       return;
     }
 
-    // Check Bearer token — could be API key or OAuth JWT
     const candidate = extractApiKey(req);
     if (candidate && validateApiKey(candidate)) {
       logger.debug("Authenticated via Bearer token (API key match)");
@@ -294,92 +281,103 @@ function createCombinedAuthMiddleware(
       return;
     }
 
-    // Not an API key — delegate to OAuth
     oauthMiddleware(req, res, next);
   };
 }
 
-// ── Meta token middleware ────────────────────────────────────
+function buildMetaTokenMiddleware(
+  serverUrl: URL,
+  multiTenantEnabled: boolean,
+): express.RequestHandler {
+  return async (req, res, next) => {
+    const headerToken = req.headers["x-meta-token"];
+    if (typeof headerToken === "string" && headerToken) {
+      requestContext.run({ accessToken: headerToken }, () => next());
+      return;
+    }
 
-/**
- * Resolves the Meta Graph API access token for the current request.
- *
- * Priority:
- *  1. X-Meta-Token header (per-request override)
- *  2. TokenManager active token (multi-token registry)
- *  3. META_ACCESS_TOKEN environment variable
- *
- * When only TokenManager has tokens (no header, no env var), the middleware
- * proceeds without setting request context — getAccessToken() will resolve
- * the token from TokenManager instead.
- */
-function metaTokenMiddleware(
-  req: express.Request,
-  res: express.Response,
-  next: express.NextFunction,
-): void {
-  // Priority 1: X-Meta-Token header (per-request override)
-  const headerToken = req.headers["x-meta-token"];
-  if (typeof headerToken === "string" && headerToken) {
-    requestContext.run({ accessToken: headerToken }, () => {
-      next();
+    const auth = (req as express.Request & {
+      auth?: { extra?: Record<string, unknown> };
+    }).auth;
+    const fbUserId =
+      typeof auth?.extra?.fbUserId === "string" ? auth.extra.fbUserId : undefined;
+    const metaTokenName =
+      typeof auth?.extra?.metaTokenName === "string"
+        ? auth.extra.metaTokenName
+        : undefined;
+
+    if (multiTenantEnabled && fbUserId) {
+      try {
+        const accessToken = await getDecryptedToken(
+          fbUserId,
+          metaTokenName,
+          serverUrl,
+        );
+        requestContext.run(
+          { accessToken, fbUserId, metaTokenName },
+          () => next(),
+        );
+        return;
+      } catch (err) {
+        logger.warn(
+          {
+            fbUserId,
+            metaTokenName,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          "Failed to resolve user Meta token",
+        );
+        res.status(401).json({
+          jsonrpc: "2.0",
+          error: {
+            code: -32001,
+            message:
+              "No Meta token connected for this user. Please re-authenticate via /authorize.",
+          },
+          id: null,
+        });
+        return;
+      }
+    }
+
+    const managerToken = tokenManager.getActiveToken();
+    if (managerToken) {
+      requestContext.run({ accessToken: managerToken }, () => next());
+      return;
+    }
+
+    const envToken = process.env.META_ACCESS_TOKEN;
+    if (envToken) {
+      requestContext.run({ accessToken: envToken }, () => next());
+      return;
+    }
+
+    logger.error("No Meta access token available for this request");
+    res.status(500).json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32603,
+        message:
+          "No Meta token configured. Connect via Meta OAuth, set META_ACCESS_TOKEN, or pass X-Meta-Token header.",
+      },
+      id: null,
     });
-    return;
-  }
-
-  // Priority 2: TokenManager active token (multi-token registry)
-  const managerToken = tokenManager.getActiveToken();
-  if (managerToken) {
-    requestContext.run({ accessToken: managerToken }, () => {
-      next();
-    });
-    return;
-  }
-
-  // Priority 3: META_ACCESS_TOKEN env var (legacy fallback)
-  const envToken = process.env.META_ACCESS_TOKEN;
-  if (envToken) {
-    requestContext.run({ accessToken: envToken }, () => {
-      next();
-    });
-    return;
-  }
-
-  logger.error(
-    "No Meta access token: set META_ACCESS_TOKEN or META_TOKENS env var, or pass X-Meta-Token header",
-  );
-  res.status(500).json({
-    jsonrpc: "2.0",
-    error: {
-      code: -32603,
-      message:
-        "Server configuration error: Meta access token not configured. " +
-        "Set META_ACCESS_TOKEN or META_TOKENS env var, or pass X-Meta-Token header.",
-    },
-    id: null,
-  });
+  };
 }
 
-// ── Server startup ───────────────────────────────────────────
-
-/**
- * Creates and starts an Express HTTP server with StreamableHTTP MCP transport.
- * Supports both OAuth 2.1 and API key authentication.
- */
 export async function startHttpTransport(
   createServer: () => McpServer,
   port: number,
 ): Promise<void> {
   const app = express();
   const isProduction = process.env.NODE_ENV === "production";
-  const { approvalPin: expectedPin, pinRequired } = resolveSecurityConfig();
+  const config = resolveSecurityConfig();
 
-  // Trust proxy (Cloud Run terminates TLS at the load balancer)
   app.set("trust proxy", 1);
   app.use(cors());
+  app.use(cookieParser());
   app.use(express.json({ limit: "10mb" }));
 
-  // ── Security headers (all responses) ─────────────────────
   app.use((_req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
@@ -390,7 +388,6 @@ export async function startHttpTransport(
     next();
   });
 
-  // ── HTTPS enforcement in production ──────────────────────
   if (isProduction) {
     app.use((req, res, next) => {
       if (req.header("x-forwarded-proto") !== "https") {
@@ -403,77 +400,110 @@ export async function startHttpTransport(
 
   const serverUrl = getServerUrl();
 
-  // ── Health check (no auth) ──────────────────────────────
+  if (config.multiTenantEnabled) {
+    if (!isFirestoreEnabled()) {
+      logger.warn(
+        "Multi-tenant Meta OAuth enabled but Firestore is not configured (no FIRESTORE_PROJECT_ID/GOOGLE_CLOUD_PROJECT/FIRESTORE_EMULATOR_HOST). Falling back to in-memory stores — sessions and tokens will be lost on restart.",
+      );
+      oauthProvider.configure({
+        clientsStore: new InMemoryClientsStore(),
+        authCodesStore: new InMemoryAuthCodesStore(),
+        resolvePendingAuth: () => pendingAuthStorage.getStore() ?? null,
+      });
+    } else {
+      oauthProvider.configure({
+        clientsStore: new FirestoreClientsStore(),
+        authCodesStore: new FirestoreAuthCodesStore(),
+        resolvePendingAuth: () => pendingAuthStorage.getStore() ?? null,
+      });
+    }
+  }
+
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", server: "meta-ads-mcp", version: "1.0.0" });
   });
 
-  // ── Consent page (GET /authorize) ───────────────────────
-  // Must be BEFORE mcpAuthRouter so our HTML page is served
-  // instead of the SDK's GET handler.
-  app.get("/authorize", (req, res) => {
-    const query = req.query as Record<string, string>;
-    res.setHeader(
-      "Content-Security-Policy",
-      "default-src 'none'; style-src 'unsafe-inline'",
-    );
-    res.type("html").send(renderConsentPage(query, { pinRequired }));
-  });
+  if (config.multiTenantEnabled) {
+    mountAuthRoutes(app, { serverUrl });
 
-  // ── PIN validation for consent approval ─────────────────
-  // Must be BEFORE mcpAuthRouter so the PIN is validated
-  // before the SDK processes the authorization.
-  if (pinRequired) {
+    app.get("/authorize", async (req, res) => {
+      const session = await getSession(req);
+      if (!session) {
+        const returnTo = req.originalUrl;
+        res.redirect(302, `/auth/meta?return=${encodeURIComponent(returnTo)}`);
+        return;
+      }
+
+      const tokens = await listTokens(session.fbUserId);
+      const activeName = await getDefaultTokenName(session.fbUserId);
+
+      const query = req.query as Record<string, string>;
+      const redirectOrigin = query.redirect_uri
+        ? new URL(query.redirect_uri, serverUrl).origin
+        : null;
+      res.setHeader(
+        "Content-Security-Policy",
+        `default-src 'none'; style-src 'unsafe-inline'; form-action 'self'${
+          redirectOrigin ? ` ${redirectOrigin}` : ""
+        }`,
+      );
+
+      res.type("html").send(
+        renderConsentPage({
+          query,
+          user: {
+            fbUserId: session.fbUserId,
+            email: session.email,
+            name: session.name,
+          },
+          tokens,
+          activeName,
+        }),
+      );
+    });
+
     app.post(
       "/authorize",
       express.urlencoded({ extended: false }),
-      (req, res, next) => {
-        const ip = req.ip ?? req.socket.remoteAddress ?? "unknown";
-
-        if (isPinRateLimited(ip)) {
-          const { approval_pin: _, ...oauthParams } = req.body as Record<string, string>;
-          res
-            .status(429)
-            .type("html")
-            .send(renderConsentPage(oauthParams, { pinRequired: true, rateLimited: true }));
+      async (req, res, next) => {
+        const session = await getSession(req);
+        if (!session) {
+          res.status(401).type("html").send(
+            "<p>Sesión expirada. <a href=\"/authorize\">Inicia de nuevo</a>.</p>",
+          );
           return;
         }
 
-        const providedPin = req.body?.approval_pin;
-        if (
-          !providedPin ||
-          typeof providedPin !== "string" ||
-          providedPin.length > 128 ||
-          !verifyPin(providedPin, expectedPin)
-        ) {
-          recordPinFailure(ip);
-          const { approval_pin: _, ...oauthParams } = req.body as Record<string, string>;
-          logger.warn({ ip }, "Invalid approval PIN attempt");
-          res
-            .status(403)
-            .type("html")
-            .send(
-              renderConsentPage(oauthParams, {
-                pinRequired: true,
-                error: "Invalid approval PIN. Please try again.",
-              }),
-            );
+        let activeName: string | null = null;
+        const requestedToken =
+          typeof req.body?.token === "string" && req.body.token.length > 0
+            ? req.body.token
+            : null;
+        if (requestedToken) {
+          await setDefaultToken(session.fbUserId, requestedToken);
+          activeName = requestedToken;
+        } else {
+          activeName = await getDefaultTokenName(session.fbUserId);
+        }
+
+        if (!activeName) {
+          res.status(400).type("html").send(
+            "<p>No hay token de Meta conectado. Vuelve a <a href=\"/authorize\">/authorize</a>.</p>",
+          );
           return;
         }
 
-        // PIN valid — reset failures and strip field before SDK sees it
-        resetPinFailures(ip);
-        delete req.body.approval_pin;
-        next();
+        pendingAuthStorage.run(
+          { fbUserId: session.fbUserId, metaTokenName: activeName },
+          () => next(),
+        );
       },
     );
   }
 
-  // ── Rate limiting on OAuth endpoints ───────────────────────
-  app.use("/register", createRateLimiter(20, 15 * 60 * 1000)); // 20 per 15min per IP
-  app.use("/token", createRateLimiter(60, 15 * 60 * 1000));    // 60 per 15min per IP
+  app.use("/register", createRateLimiter(20, 15 * 60 * 1000));
+  app.use("/token", createRateLimiter(60, 15 * 60 * 1000));
 
-  // ── OAuth router (handles POST /authorize, /token, /register, /.well-known/*) ──
   app.use(
     mcpAuthRouter({
       provider: oauthProvider,
@@ -482,15 +512,14 @@ export async function startHttpTransport(
     }),
   );
 
-  // ── Auth middleware: API key + OAuth 2.1 ─────────────────
   const oauthBearerAuth = requireBearerAuth({ verifier: oauthProvider });
   const auth = createCombinedAuthMiddleware(oauthBearerAuth);
+  const metaTokenMw = buildMetaTokenMiddleware(serverUrl, config.multiTenantEnabled);
 
-  // ── MCP endpoint — stateless mode ──────────────────────
-  app.post("/mcp", auth, metaTokenMiddleware, async (req, res) => {
+  app.post("/mcp", auth, metaTokenMw, async (req, res) => {
     try {
       const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined, // stateless
+        sessionIdGenerator: undefined,
       });
 
       const server = createServer();
@@ -514,14 +543,10 @@ export async function startHttpTransport(
     }
   });
 
-  // Handle GET/DELETE for MCP (required by spec even in stateless mode)
-  app.get("/mcp", auth, (_req: express.Request, res: express.Response) => {
+  app.get("/mcp", auth, (_req, res) => {
     res.status(405).json({
       jsonrpc: "2.0",
-      error: {
-        code: -32000,
-        message: "SSE not supported in stateless mode. Use POST.",
-      },
+      error: { code: -32000, message: "SSE not supported in stateless mode. Use POST." },
       id: null,
     });
   });
@@ -529,22 +554,24 @@ export async function startHttpTransport(
   app.delete("/mcp", auth, (_req, res) => {
     res.status(405).json({
       jsonrpc: "2.0",
-      error: {
-        code: -32000,
-        message: "Session termination not applicable in stateless mode.",
-      },
+      error: { code: -32000, message: "Session termination not applicable in stateless mode." },
       id: null,
     });
   });
 
-  // ── Start listening ─────────────────────────────────────
   const authModes: string[] = [];
   if (isApiKeyConfigured()) authModes.push("API Key");
-  authModes.push("OAuth 2.1");
+  authModes.push(config.multiTenantEnabled ? "Meta OAuth" : "OAuth 2.1");
 
   app.listen(port, () => {
     logger.info(
-      { port, serverUrl: serverUrl.href, auth: authModes },
+      {
+        port,
+        serverUrl: serverUrl.href,
+        auth: authModes,
+        multiTenant: config.multiTenantEnabled,
+        firestore: isFirestoreEnabled(),
+      },
       `Meta Ads MCP server listening (HTTP transport — auth: ${authModes.join(", ")})`,
     );
   });

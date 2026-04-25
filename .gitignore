@@ -6,8 +6,20 @@ dist/
 
 # Environment
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+
+# Secrets / credentials — public repo, never commit any of these
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+.gitleaks-report.json
+id_rsa
+id_dsa
+id_ed25519
 
 # IDE / tooling
 .vscode/

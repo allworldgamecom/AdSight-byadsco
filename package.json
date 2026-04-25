@@ -1,7 +1,18 @@
 {
   "name": "meta-ads-mcp",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "MCP server for Meta Ads (Facebook/Instagram) management - agency multi-account",
+  "author": {
+    "name": "Santiago Bastidas",
+    "email": "dev@byads.co",
+    "url": "https://byads.co"
+  },
+  "contributors": [
+    {
+      "name": "ByAds",
+      "url": "https://byads.co"
+    }
+  ],
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
@@ -23,7 +34,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@google-cloud/firestore": "^8.5.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "express": "^5.2.1",
     "jose": "^6.0.0",
@@ -32,6 +45,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
@@ -43,13 +57,40 @@
   },
   "keywords": [
     "mcp",
+    "model-context-protocol",
+    "mcp-server",
     "meta",
+    "meta-ads",
+    "meta-marketing-api",
     "facebook",
+    "facebook-ads",
+    "facebook-ads-api",
+    "facebook-marketing-api",
     "instagram",
+    "instagram-ads",
     "ads",
-    "marketing",
     "advertising",
-    "agency"
+    "marketing",
+    "marketing-api",
+    "campaigns",
+    "agency",
+    "multi-tenant",
+    "claude",
+    "anthropic",
+    "ai-agent",
+    "openai",
+    "oauth",
+    "firestore",
+    "cloud-run",
+    "typescript"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "homepage": "https://github.com/byadsco/meta-ads-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/byadsco/meta-ads-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/byadsco/meta-ads-mcp/issues"
+  }
 }
