@@ -179,3 +179,47 @@ export async function validateToken(
     return { valid: false, error: message };
   }
 }
+
+export interface MetaBusiness {
+  id: string;
+  name: string | null;
+}
+
+export async function fetchPrimaryBusiness(
+  accessToken: string,
+  apiVersion: string = META_API_VERSION,
+): Promise<MetaBusiness | null> {
+  const url = new URL(`/${apiVersion}/me/businesses`, META_GRAPH);
+  url.searchParams.set("fields", "id,name");
+  url.searchParams.set("limit", "1");
+  url.searchParams.set("access_token", accessToken);
+
+  try {
+    const response = await fetch(url.toString());
+    const body = (await response.json()) as Record<string, unknown>;
+
+    if (!response.ok || body.error) {
+      const message =
+        typeof body.error === "object" && body.error && "message" in body.error
+          ? String((body.error as { message?: unknown }).message)
+          : `HTTP ${response.status}`;
+      logger.warn({ error: message }, "Meta /me/businesses fetch failed");
+      return null;
+    }
+
+    const data = Array.isArray(body.data) ? body.data : [];
+    const first = data[0];
+    if (!first || typeof first !== "object") return null;
+    const id = (first as { id?: unknown }).id;
+    if (typeof id !== "string") return null;
+    const name = (first as { name?: unknown }).name;
+    return {
+      id,
+      name: typeof name === "string" ? name : null,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn({ error: message }, "Meta /me/businesses fetch threw");
+    return null;
+  }
+}

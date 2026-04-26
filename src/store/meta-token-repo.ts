@@ -30,7 +30,8 @@ export interface MetaTokenDoc {
   scopes: string[];
   metaUserId: string | null;
   metaUserName: string | null;
-  businessId?: string | null;
+  businessId: string | null;
+  businessName: string | null;
   isDefault: boolean;
   createdAt: number;
   updatedAt: number;
@@ -42,6 +43,8 @@ export interface MetaTokenSummary {
   expiresAt: number | null;
   metaUserId: string | null;
   metaUserName: string | null;
+  businessId: string | null;
+  businessName: string | null;
   isDefault: boolean;
   isExpired: boolean;
 }
@@ -56,6 +59,7 @@ export interface SaveTokenInput {
   metaUserId: string | null;
   metaUserName: string | null;
   businessId?: string | null;
+  businessName?: string | null;
   setAsDefault?: boolean;
 }
 
@@ -81,6 +85,8 @@ function summarize(name: string, doc: MetaTokenDoc, now: number): MetaTokenSumma
     expiresAt: doc.expiresAt,
     metaUserId: doc.metaUserId,
     metaUserName: doc.metaUserName,
+    businessId: doc.businessId ?? null,
+    businessName: doc.businessName ?? null,
     isDefault: doc.isDefault,
     isExpired: doc.expiresAt !== null && doc.expiresAt < now,
   };
@@ -213,6 +219,7 @@ export class FirestoreMetaTokenRepo implements MetaTokenRepo {
       metaUserId: input.metaUserId,
       metaUserName: input.metaUserName,
       businessId: input.businessId ?? null,
+      businessName: input.businessName ?? null,
       isDefault: input.setAsDefault ?? false,
       createdAt: now,
       updatedAt: now,
@@ -368,6 +375,7 @@ export class InMemoryMetaTokenRepo implements MetaTokenRepo {
       metaUserId: input.metaUserId,
       metaUserName: input.metaUserName,
       businessId: input.businessId ?? null,
+      businessName: input.businessName ?? null,
       isDefault,
       createdAt: now,
       updatedAt: now,
