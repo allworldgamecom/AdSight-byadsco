@@ -35,7 +35,6 @@ import { logger } from "../utils/logger.js";
 
 interface PendingAuth {
   fbUserId: string;
-  metaTokenName: string;
 }
 
 const pendingAuthStorage = new AsyncLocalStorage<PendingAuth>();
@@ -309,20 +308,16 @@ function buildMetaTokenMiddleware(
     }).auth;
     const fbUserId =
       typeof auth?.extra?.fbUserId === "string" ? auth.extra.fbUserId : undefined;
-    const metaTokenName =
-      typeof auth?.extra?.metaTokenName === "string"
-        ? auth.extra.metaTokenName
-        : undefined;
 
     if (multiTenantEnabled && fbUserId) {
       try {
         const accessToken = await getDecryptedToken(
           fbUserId,
-          metaTokenName,
+          undefined,
           serverUrl,
         );
         requestContext.run(
-          { accessToken, fbUserId, metaTokenName },
+          { accessToken, fbUserId },
           () => next(),
         );
         return;
@@ -330,7 +325,6 @@ function buildMetaTokenMiddleware(
         logger.warn(
           {
             fbUserId,
-            metaTokenName,
             error: err instanceof Error ? err.message : String(err),
           },
           "Failed to resolve user Meta token",
@@ -508,10 +502,7 @@ export async function startHttpTransport(
           return;
         }
 
-        pendingAuthStorage.run(
-          { fbUserId: session.fbUserId, metaTokenName: activeName },
-          () => next(),
-        );
+        pendingAuthStorage.run({ fbUserId: session.fbUserId }, () => next());
       },
     );
   }

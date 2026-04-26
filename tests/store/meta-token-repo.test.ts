@@ -203,4 +203,32 @@ describe("InMemoryMetaTokenRepo", () => {
     expect(tokens[0].businessId).toBeNull();
     expect(tokens[0].businessName).toBeNull();
   });
+
+  it("getDecryptedToken without a name resolves the current default after setDefaultToken (enables agent token pivoting)", async () => {
+    await repo.saveToken(
+      makeInput({
+        name: "byads",
+        kind: "system_user",
+        expiresAt: null,
+        accessToken: "byads-token",
+        setAsDefault: true,
+      }),
+    );
+    await repo.saveToken(
+      makeInput({
+        name: "personal",
+        kind: "system_user",
+        expiresAt: null,
+        accessToken: "personal-token",
+      }),
+    );
+
+    expect(await repo.getDecryptedToken("fb-1")).toBe("byads-token");
+
+    expect(await repo.setDefaultToken("fb-1", "personal")).toBe(true);
+    expect(await repo.getDecryptedToken("fb-1")).toBe("personal-token");
+
+    expect(await repo.setDefaultToken("fb-1", "byads")).toBe(true);
+    expect(await repo.getDecryptedToken("fb-1")).toBe("byads-token");
+  });
 });
