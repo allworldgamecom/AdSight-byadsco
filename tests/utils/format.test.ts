@@ -67,6 +67,11 @@ describe("validateMetaId", () => {
     expect(() => validateMetaId("act_act_123")).toThrow();
   });
 
+  it("rejects mixed act_/underscore forms (no real Meta endpoint uses them)", () => {
+    expect(() => validateMetaId("act_123_456")).toThrow(/Invalid Meta id/);
+    expect(() => validateMetaId("act_1_2")).toThrow();
+  });
+
   it("propagates the kind label in the error", () => {
     expect(() => validateMetaId("bad", "campaign_id")).toThrow(
       /Invalid Meta campaign_id/,

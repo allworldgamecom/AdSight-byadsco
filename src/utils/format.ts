@@ -34,9 +34,9 @@ export function normalizeAccountId(id: string): string {
  * than letting a malformed id leak into a path segment or bucket name.
  */
 export function validateMetaId(id: string, kind = "id"): string {
-  if (typeof id !== "string" || !/^(act_)?\d{1,30}(_\d{1,30})?$/.test(id)) {
+  if (typeof id !== "string" || !/^(act_\d{1,30}|\d{1,30}(_\d{1,30})?)$/.test(id)) {
     throw new Error(
-      `Invalid Meta ${kind}: must be numeric, optionally prefixed with "act_" (account) or postfixed with "_<id>" (post/comment). Got: ${JSON.stringify(id).slice(0, 80)}`,
+      `Invalid Meta ${kind}: must be numeric, "act_<numeric>" (account), or "<numeric>_<numeric>" (post/comment) — the three formats are mutually exclusive. Got: ${JSON.stringify(id).slice(0, 80)}`,
     );
   }
   return id;
