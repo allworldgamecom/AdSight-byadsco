@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
+import { validateMetaId } from "../utils/format.js";
 
 export function registerBudgetTools(server: McpServer): void {
   // ─── Create Budget Schedule ──────────────────────────────────
@@ -19,8 +20,9 @@ export function registerBudgetTools(server: McpServer): void {
       time_end: z.string().describe("ISO 8601 end time for the budget increase"),
     },
     async ({ campaign_id, budget_value, budget_value_type, time_start, time_end }) => {
+      const id = validateMetaId(campaign_id, "campaign");
       const result = await metaApiClient.postForm<{ id: string }>(
-        `/${campaign_id}/budget_schedules`,
+        `/${id}/budget_schedules`,
         {
           budget_value,
           budget_value_type,
@@ -33,7 +35,7 @@ export function registerBudgetTools(server: McpServer): void {
         content: [
           {
             type: "text",
-            text: `Budget schedule created!\nID: ${result.id}\nCampaign: ${campaign_id}\nValue: ${budget_value} (${budget_value_type})\nPeriod: ${time_start} → ${time_end}`,
+            text: `Budget schedule created!\nID: ${result.id}\nCampaign: ${id}\nValue: ${budget_value} (${budget_value_type})\nPeriod: ${time_start} → ${time_end}`,
           },
         ],
       };

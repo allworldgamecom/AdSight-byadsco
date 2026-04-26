@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { normalizeAccountId } from "../utils/format.js";
+import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { AD_DEFAULT_FIELDS } from "../meta/types/ad.js";
 import type { Ad, MetaApiResponse } from "../meta/types/index.js";
@@ -23,9 +23,9 @@ export function registerAdTools(server: McpServer): void {
     async ({ account_id, limit, campaign_id, adset_id, status_filter }) => {
       let path: string;
       if (adset_id) {
-        path = `/${adset_id}/ads`;
+        path = `/${validateMetaId(adset_id, "adset")}/ads`;
       } else if (campaign_id) {
-        path = `/${campaign_id}/ads`;
+        path = `/${validateMetaId(campaign_id, "campaign")}/ads`;
       } else {
         path = `/${normalizeAccountId(account_id)}/ads`;
       }
@@ -73,8 +73,9 @@ export function registerAdTools(server: McpServer): void {
       fields: z.array(z.string()).optional(),
     },
     async ({ ad_id, fields }) => {
+      const id = validateMetaId(ad_id, "ad");
       const fieldsParam = buildFieldsParam(fields, [...AD_DEFAULT_FIELDS, "bid_amount", "tracking_specs"]);
-      const ad = await metaApiClient.get<Ad>(`/${ad_id}`, { fields: fieldsParam });
+      const ad = await metaApiClient.get<Ad>(`/${id}`, { fields: fieldsParam });
 
       return {
         content: [
@@ -104,24 +105,26 @@ export function registerAdTools(server: McpServer): void {
         .describe("Tracking specifications"),
     },
     async ({ account_id, name, adset_id, creative_id, status, tracking_specs }) => {
-      const id = normalizeAccountId(account_id);
+      const accountPath = normalizeAccountId(account_id);
+      const adsetIdValidated = validateMetaId(adset_id, "adset");
+      const creativeIdValidated = validateMetaId(creative_id, "creative");
 
       const body: Record<string, string | number | boolean> = {
         name,
-        adset_id,
-        creative: JSON.stringify({ creative_id }),
+        adset_id: adsetIdValidated,
+        creative: JSON.stringify({ creative_id: creativeIdValidated }),
         status,
       };
 
       if (tracking_specs) body.tracking_specs = JSON.stringify(tracking_specs);
 
-      const result = await metaApiClient.postForm<{ id: string }>(`/${id}/ads`, body);
+      const result = await metaApiClient.postForm<{ id: string }>(`/${accountPath}/ads`, body);
 
       return {
         content: [
           {
             type: "text",
-            text: `Ad created successfully!\nID: ${result.id}\nName: ${name}\nAd Set: ${adset_id}\nCreative: ${creative_id}\nStatus: ${status}`,
+            text: `Ad created successfully!\nID: ${result.id}\nName: ${name}\nAd Set: ${adsetIdValidated}\nCreative: ${creativeIdValidated}\nStatus: ${status}`,
           },
         ],
       };
@@ -139,16 +142,21 @@ export function registerAdTools(server: McpServer): void {
       creative_id: z.string().optional().describe("New creative ID"),
     },
     async ({ ad_id, name, status, creative_id }) => {
+      const id = validateMetaId(ad_id, "ad");
       const body: Record<string, string | number | boolean> = {};
       if (name !== undefined) body.name = name;
       if (status !== undefined) body.status = status;
-      if (creative_id !== undefined) body.creative = JSON.stringify({ creative_id });
+      if (creative_id !== undefined) {
+        body.creative = JSON.stringify({
+          creative_id: validateMetaId(creative_id, "creative"),
+        });
+      }
 
-      await metaApiClient.postForm<{ success: boolean }>(`/${ad_id}`, body);
+      await metaApiClient.postForm<{ success: boolean }>(`/${id}`, body);
 
       return {
         content: [
-          { type: "text", text: `Ad ${ad_id} updated successfully.\nChanges: ${JSON.stringify(body)}` },
+          { type: "text", text: `Ad ${id} updated successfully.\nChanges: ${JSON.stringify(body)}` },
         ],
       };
     },
@@ -162,13 +170,14 @@ export function registerAdTools(server: McpServer): void {
       ad_id: z.string().describe("Ad ID to delete"),
     },
     async ({ ad_id }) => {
-      await metaApiClient.postForm<{ success: boolean }>(`/${ad_id}`, {
+      const id = validateMetaId(ad_id, "ad");
+      await metaApiClient.postForm<{ success: boolean }>(`/${id}`, {
         status: "DELETED",
       });
 
       return {
         content: [
-          { type: "text", text: `Ad ${ad_id} has been deleted (status set to DELETED).` },
+          { type: "text", text: `Ad ${id} has been deleted (status set to DELETED).` },
         ],
       };
     },

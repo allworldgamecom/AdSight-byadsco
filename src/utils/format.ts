@@ -16,8 +16,17 @@ export function normalizeAccountId(id: string): string {
 }
 
 /**
- * Validate a Meta resource ID (campaign, adset, ad, creative, page, business…).
- * Meta IDs are always purely numeric strings of variable length.
+ * Validate a Meta resource ID before it is interpolated into a Graph API
+ * path. Accepts the three formats Meta uses for path segments:
+ *   - Plain numeric id: `1234567890` (campaign, adset, ad, creative, page,
+ *     business, audience, rule, pixel, study, lead form, video, user…).
+ *   - Ad account id: `act_1234567890` (insights/reports `object_id`).
+ *   - Post or comment id: `1234567890_9876543210` — Meta's
+ *     `effective_object_story_id` and per-page comment ids embed the page
+ *     id and the post/comment id separated by an underscore.
+ *
+ * Reject anything else so a crafted id can't smuggle path traversal,
+ * query strings, or whitespace into the URL of a subsequent fetch.
  *
  * Use at the boundary of any tool that takes an id from a caller and
  * forwards it into a Meta API path or a rate-limiter bucket key. Throws
@@ -25,9 +34,9 @@ export function normalizeAccountId(id: string): string {
  * than letting a malformed id leak into a path segment or bucket name.
  */
 export function validateMetaId(id: string, kind = "id"): string {
-  if (typeof id !== "string" || !/^\d{1,30}$/.test(id)) {
+  if (typeof id !== "string" || !/^(act_)?\d{1,30}(_\d{1,30})?$/.test(id)) {
     throw new Error(
-      `Invalid Meta ${kind}: must be a numeric string. Got: ${JSON.stringify(id).slice(0, 80)}`,
+      `Invalid Meta ${kind}: must be numeric, optionally prefixed with "act_" (account) or postfixed with "_<id>" (post/comment). Got: ${JSON.stringify(id).slice(0, 80)}`,
     );
   }
   return id;

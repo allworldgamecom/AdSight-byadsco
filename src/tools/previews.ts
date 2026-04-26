@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { normalizeAccountId } from "../utils/format.js";
+import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import type { MetaApiResponse } from "../meta/types/index.js";
 
 const adFormatEnum = z.enum([
@@ -56,8 +56,9 @@ export function registerPreviewTools(server: McpServer): void {
       ad_format: adFormatEnum.default("MOBILE_FEED_STANDARD").describe("Ad placement format"),
     },
     async ({ ad_id, ad_format }) => {
+      const id = validateMetaId(ad_id, "ad");
       const response = await metaApiClient.get<MetaApiResponse<AdPreview>>(
-        `/${ad_id}/previews`,
+        `/${id}/previews`,
         { ad_format },
       );
       const previews = response.data ?? [];
@@ -142,10 +143,22 @@ export function registerPreviewTools(server: McpServer): void {
         .describe("Creative specification"),
     },
     async ({ account_id, ad_format, creative }) => {
-      const id = normalizeAccountId(account_id);
+      const accountPath = normalizeAccountId(account_id);
+      if (creative.object_story_spec?.page_id) {
+        creative.object_story_spec.page_id = validateMetaId(
+          creative.object_story_spec.page_id,
+          "page",
+        );
+      }
+      if (creative.object_story_spec?.video_data?.video_id) {
+        creative.object_story_spec.video_data.video_id = validateMetaId(
+          creative.object_story_spec.video_data.video_id,
+          "video",
+        );
+      }
 
       const response = await metaApiClient.get<MetaApiResponse<AdPreview>>(
-        `/${id}/generatepreviews`,
+        `/${accountPath}/generatepreviews`,
         {
           ad_format,
           creative: JSON.stringify(creative),

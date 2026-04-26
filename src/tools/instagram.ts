@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
+import { validateMetaId } from "../utils/format.js";
 import {
   INSTAGRAM_ACCOUNT_FIELDS,
   INSTAGRAM_MEDIA_DEFAULT_FIELDS,
@@ -20,12 +21,13 @@ export function registerInstagramTools(server: McpServer): void {
       page_id: z.string().describe("Facebook Page ID to look up its linked Instagram Business account"),
     },
     async ({ page_id }) => {
+      const id = validateMetaId(page_id, "page");
       // Request the page with nested instagram_business_account fields
       const nestedFields = INSTAGRAM_ACCOUNT_FIELDS.join(",");
       const result = await metaApiClient.get<{
         instagram_business_account?: InstagramAccount;
         id: string;
-      }>(`/${page_id}`, {
+      }>(`/${id}`, {
         fields: `instagram_business_account{${nestedFields}}`,
       });
 
@@ -36,7 +38,7 @@ export function registerInstagramTools(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `No Instagram Business account linked to Page ${page_id}. Ensure the Page has an Instagram Business or Creator account connected in Page Settings.`,
+              text: `No Instagram Business account linked to Page ${id}. Ensure the Page has an Instagram Business or Creator account connected in Page Settings.`,
             },
           ],
         };
@@ -63,10 +65,11 @@ export function registerInstagramTools(server: McpServer): void {
       limit: z.number().min(1).max(100).default(25).describe("Number of posts to return"),
     },
     async ({ instagram_account_id, limit }) => {
+      const id = validateMetaId(instagram_account_id, "instagram_account");
       const fieldsParam = [...INSTAGRAM_MEDIA_DEFAULT_FIELDS].join(",");
 
       const response = await metaApiClient.get<MetaApiResponse<InstagramMedia>>(
-        `/${instagram_account_id}/media`,
+        `/${id}/media`,
         { fields: fieldsParam, limit },
       );
 

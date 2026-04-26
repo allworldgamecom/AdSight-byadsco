@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { normalizeAccountId } from "../utils/format.js";
+import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { CREATIVE_DEFAULT_FIELDS } from "../meta/types/creative.js";
 import { IMAGE_DEFAULT_FIELDS } from "../meta/types/image.js";
@@ -88,7 +88,7 @@ export function registerCreativeTools(server: McpServer): void {
 
       let path: string;
       if (ad_id) {
-        path = `/${ad_id}/adcreatives`;
+        path = `/${validateMetaId(ad_id, "ad")}/adcreatives`;
       } else if (account_id) {
         path = `/${normalizeAccountId(account_id)}/adcreatives`;
       } else {
@@ -129,8 +129,9 @@ export function registerCreativeTools(server: McpServer): void {
       fields: z.array(z.string()).optional(),
     },
     async ({ creative_id, fields }) => {
+      const id = validateMetaId(creative_id, "creative");
       const fieldsParam = buildFieldsParam(fields, [...CREATIVE_DEFAULT_FIELDS]);
-      const creative = await metaApiClient.get<AdCreative>(`/${creative_id}`, {
+      const creative = await metaApiClient.get<AdCreative>(`/${id}`, {
         fields: fieldsParam,
       });
       const effectiveLinkUrl = extractEffectiveLinkUrl(creative);
@@ -182,32 +183,45 @@ export function registerCreativeTools(server: McpServer): void {
       image_hash, image_url, video_id, link_url, message, headline, description,
       call_to_action_type, url_tags,
     }) => {
-      const id = normalizeAccountId(account_id);
+      const accountPath = normalizeAccountId(account_id);
+      const pageIdValidated = page_id ? validateMetaId(page_id, "page") : undefined;
+      const objectStoryIdValidated = object_story_id
+        ? validateMetaId(object_story_id, "post")
+        : undefined;
+      const instagramActorIdValidated = instagram_actor_id
+        ? validateMetaId(instagram_actor_id, "instagram_actor")
+        : undefined;
+      const sourceInstagramMediaIdValidated = source_instagram_media_id
+        ? validateMetaId(source_instagram_media_id, "instagram_media")
+        : undefined;
+      const videoIdValidated = video_id
+        ? validateMetaId(video_id, "video")
+        : undefined;
 
       const body: Record<string, string | number | boolean> = { name };
 
-      if (source_instagram_media_id) {
+      if (sourceInstagramMediaIdValidated) {
         // Mode 3: Promote an existing Instagram post — NO object_story_spec
         // Docs: https://developers.facebook.com/docs/instagram/ads-api/guides/use-posts-as-ads
-        body.source_instagram_media_id = source_instagram_media_id;
-        if (page_id) body.object_id = page_id;
-        if (instagram_actor_id) body.instagram_user_id = instagram_actor_id;
+        body.source_instagram_media_id = sourceInstagramMediaIdValidated;
+        if (pageIdValidated) body.object_id = pageIdValidated;
+        if (instagramActorIdValidated) body.instagram_user_id = instagramActorIdValidated;
         if (call_to_action_type) {
           body.call_to_action = JSON.stringify({
             type: call_to_action_type,
             value: link_url ? { link: link_url } : undefined,
           });
         }
-      } else if (object_story_id) {
+      } else if (objectStoryIdValidated) {
         // Mode 2: Boost an existing Facebook Page post — NO object_story_spec
-        body.object_story_id = object_story_id;
-        if (instagram_actor_id) body.instagram_user_id = instagram_actor_id;
+        body.object_story_id = objectStoryIdValidated;
+        if (instagramActorIdValidated) body.instagram_user_id = instagramActorIdValidated;
       } else {
         // Mode 1: Build creative from scratch with object_story_spec
-        if (!page_id) {
+        if (!pageIdValidated) {
           throw new Error("page_id is required when building a creative from scratch (no object_story_id or source_instagram_media_id provided).");
         }
-        if (video_id && !image_hash && !image_url) {
+        if (videoIdValidated && !image_hash && !image_url) {
           throw new Error("video creatives built from scratch require image_hash or image_url as a thumbnail.");
         }
         // SSRF guard: only validate image_url when it will actually be
@@ -224,11 +238,11 @@ export function registerCreativeTools(server: McpServer): void {
             throw err;
           }
         }
-        const objectStorySpec: Record<string, unknown> = { page_id };
+        const objectStorySpec: Record<string, unknown> = { page_id: pageIdValidated };
 
-        if (video_id) {
+        if (videoIdValidated) {
           // Video creative — link goes inside CTA, not as top-level field
-          const videoData: Record<string, unknown> = { video_id };
+          const videoData: Record<string, unknown> = { video_id: videoIdValidated };
           if (message) videoData.message = message;
           if (image_hash) videoData.image_hash = image_hash;
           if (image_url && !image_hash) videoData.image_url = image_url;
@@ -258,8 +272,8 @@ export function registerCreativeTools(server: McpServer): void {
           objectStorySpec.link_data = linkData;
         }
 
-        if (instagram_actor_id) {
-          objectStorySpec.instagram_actor_id = instagram_actor_id;
+        if (instagramActorIdValidated) {
+          objectStorySpec.instagram_actor_id = instagramActorIdValidated;
         }
 
         body.object_story_spec = JSON.stringify(objectStorySpec);
@@ -268,7 +282,7 @@ export function registerCreativeTools(server: McpServer): void {
       if (url_tags) body.url_tags = url_tags;
 
       const result = await metaApiClient.postForm<{ id: string }>(
-        `/${id}/adcreatives`,
+        `/${accountPath}/adcreatives`,
         body,
       );
 
@@ -276,7 +290,7 @@ export function registerCreativeTools(server: McpServer): void {
       let effectiveStoryId: string | undefined;
       try {
         const created = await metaApiClient.get<{ id: string; effective_object_story_id?: string }>(
-          `/${result.id}`,
+          `/${validateMetaId(result.id, "creative")}`,
           { fields: "id,effective_object_story_id" },
         );
         effectiveStoryId = created.effective_object_story_id;
@@ -288,7 +302,7 @@ export function registerCreativeTools(server: McpServer): void {
         content: [
           {
             type: "text",
-            text: `Creative created successfully!\nID: ${result.id}\nName: ${name}${page_id ? `\nPage: ${page_id}` : ""}${object_story_id ? `\nBoosted Post: ${object_story_id}` : ""}${source_instagram_media_id ? `\nIG Post: ${source_instagram_media_id}` : ""}${effectiveStoryId ? `\nPost ID: ${effectiveStoryId}` : ""}\nCTA: ${call_to_action_type ?? "N/A"}`,
+            text: `Creative created successfully!\nID: ${result.id}\nName: ${name}${pageIdValidated ? `\nPage: ${pageIdValidated}` : ""}${objectStoryIdValidated ? `\nBoosted Post: ${objectStoryIdValidated}` : ""}${sourceInstagramMediaIdValidated ? `\nIG Post: ${sourceInstagramMediaIdValidated}` : ""}${effectiveStoryId ? `\nPost ID: ${effectiveStoryId}` : ""}\nCTA: ${call_to_action_type ?? "N/A"}`,
           },
         ],
       };
@@ -304,14 +318,15 @@ export function registerCreativeTools(server: McpServer): void {
       name: z.string().optional().describe("New name for the creative"),
     },
     async ({ creative_id, name }) => {
+      const id = validateMetaId(creative_id, "creative");
       const body: Record<string, string | number | boolean> = {};
       if (name !== undefined) body.name = name;
 
-      await metaApiClient.postForm<{ success: boolean }>(`/${creative_id}`, body);
+      await metaApiClient.postForm<{ success: boolean }>(`/${id}`, body);
 
       return {
         content: [
-          { type: "text", text: `Creative ${creative_id} updated successfully.` },
+          { type: "text", text: `Creative ${id} updated successfully.` },
         ],
       };
     },
@@ -479,10 +494,11 @@ export function registerCreativeTools(server: McpServer): void {
       fields: z.array(z.string()).optional(),
     },
     async ({ video_id, fields }) => {
+      const id = validateMetaId(video_id, "video");
       const fieldsParam = buildFieldsParam(fields, [...VIDEO_DETAIL_FIELDS]);
 
       const video = await metaApiClient.get<AdVideo>(
-        `/${video_id}`,
+        `/${id}`,
         { fields: fieldsParam },
       );
 

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { normalizeAccountId } from "../utils/format.js";
+import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import {
   PIXEL_DEFAULT_FIELDS,
@@ -60,10 +60,11 @@ export function registerPixelTools(server: McpServer): void {
       fields: z.array(z.string()).optional(),
     },
     async ({ pixel_id, fields }) => {
+      const id = validateMetaId(pixel_id, "pixel");
       const fieldsParam = buildFieldsParam(fields, [...PIXEL_DEFAULT_FIELDS]);
 
       const pixel = await metaApiClient.get<AdsPixel>(
-        `/${pixel_id}`,
+        `/${id}`,
         { fields: fieldsParam },
       );
 
@@ -100,6 +101,7 @@ export function registerPixelTools(server: McpServer): void {
       end_time: z.string().optional().describe("End time (ISO 8601 or Unix timestamp)"),
     },
     async ({ pixel_id, aggregation, start_time, end_time }) => {
+      const id = validateMetaId(pixel_id, "pixel");
       const params: Record<string, string | number | boolean> = {
         aggregation,
       };
@@ -107,14 +109,14 @@ export function registerPixelTools(server: McpServer): void {
       if (end_time) params.end_time = end_time;
 
       const response = await metaApiClient.get<{ data: Array<{ event: string; count: number; value?: number }> }>(
-        `/${pixel_id}/stats`,
+        `/${id}/stats`,
         params,
       );
       const stats = response.data ?? [];
 
       if (stats.length === 0) {
         return {
-          content: [{ type: "text", text: `No event data for pixel ${pixel_id} in the specified period.` }],
+          content: [{ type: "text", text: `No event data for pixel ${id} in the specified period.` }],
         };
       }
 
@@ -196,11 +198,12 @@ export function registerPixelTools(server: McpServer): void {
       default_conversion_value: z.number().optional().describe("Default monetary value"),
     },
     async ({ account_id, name, description, pixel_id, event_source_type, custom_event_type, rule, default_conversion_value }) => {
-      const id = normalizeAccountId(account_id);
+      const accountPath = normalizeAccountId(account_id);
+      const pixelIdValidated = validateMetaId(pixel_id, "pixel");
 
       const body: Record<string, string | number | boolean> = {
         name,
-        pixel_id,
+        pixel_id: pixelIdValidated,
         event_source_type,
         custom_event_type,
         rule,
@@ -210,7 +213,7 @@ export function registerPixelTools(server: McpServer): void {
       if (default_conversion_value !== undefined) body.default_conversion_value = default_conversion_value;
 
       const result = await metaApiClient.postForm<{ id: string }>(
-        `/${id}/customconversions`,
+        `/${accountPath}/customconversions`,
         body,
       );
 
@@ -218,7 +221,7 @@ export function registerPixelTools(server: McpServer): void {
         content: [
           {
             type: "text",
-            text: `Custom conversion created!\nID: ${result.id}\nName: ${name}\nEvent: ${custom_event_type}\nPixel: ${pixel_id}`,
+            text: `Custom conversion created!\nID: ${result.id}\nName: ${name}\nEvent: ${custom_event_type}\nPixel: ${pixelIdValidated}`,
           },
         ],
       };

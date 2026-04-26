@@ -123,7 +123,7 @@ describe("registerAccountTools", () => {
 
       const mockData = {
         data: [
-          { id: "page_1", name: "My Page", category: "Business" },
+          { id: "6001", name: "My Page", category: "Business" },
         ],
       };
 

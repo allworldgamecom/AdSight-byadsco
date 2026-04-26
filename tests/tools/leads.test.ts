@@ -38,7 +38,7 @@ describe("registerLeadTools", () => {
       const mockData = {
         data: [
           {
-            id: "form_1",
+            id: "5001",
             name: "Contact Form",
             status: "ACTIVE",
             leads_count: 150,
@@ -50,7 +50,7 @@ describe("registerLeadTools", () => {
 
       const handler = server._registeredTools[0].handler;
       const result = await handler({
-        page_id: "page_123",
+        page_id: "60123",
         limit: 25,
         fields: undefined,
       }) as { content: Array<{ type: string; text: string }> };
@@ -69,7 +69,7 @@ describe("registerLeadTools", () => {
       const mockData = {
         data: [
           {
-            id: "lead_1",
+            id: "7001",
             created_time: "2024-01-15T10:00:00",
             field_data: [
               { name: "email", values: ["test@example.com"] },
@@ -83,7 +83,7 @@ describe("registerLeadTools", () => {
 
       const handler = server._registeredTools[1].handler;
       const result = await handler({
-        form_id: "form_1",
+        form_id: "5001",
         limit: 100,
         fields: undefined,
         filtering: undefined,
@@ -101,7 +101,7 @@ describe("registerLeadTools", () => {
 
       const handler = server._registeredTools[1].handler;
       const result = await handler({
-        form_id: "form_1",
+        form_id: "5001",
         limit: 100,
         fields: undefined,
         filtering: undefined,
@@ -116,11 +116,11 @@ describe("registerLeadTools", () => {
       const server = createMockMcpServer();
       registerLeadTools(server as never);
 
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse({ id: "form_new_1" })));
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse({ id: "50001" })));
 
       const handler = server._registeredTools[3].handler;
       const result = await handler({
-        page_id: "page_123",
+        page_id: "60123",
         name: "New Form",
         questions: [
           { type: "EMAIL" },
@@ -132,7 +132,7 @@ describe("registerLeadTools", () => {
       }) as { content: Array<{ type: string; text: string }> };
 
       expect(result.content[0].text).toContain("Lead form created successfully");
-      expect(result.content[0].text).toContain("form_new_1");
+      expect(result.content[0].text).toContain("50001");
       expect(result.content[0].text).toContain("Questions: 2");
     });
   });

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { normalizeAccountId } from "../utils/format.js";
+import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { STUDY_DEFAULT_FIELDS } from "../meta/types/study.js";
 import type { AdStudy, MetaApiResponse } from "../meta/types/index.js";
@@ -97,8 +97,8 @@ export function registerABTestingTools(server: McpServer): void {
           cells.map((c) => ({
             name: c.name,
             treatment_percentage: c.treatment_percentage,
-            adsets: c.adsets?.map((id) => ({ id })),
-            campaigns: c.campaigns?.map((id) => ({ id })),
+            adsets: c.adsets?.map((adsetId) => ({ id: validateMetaId(adsetId, "adset") })),
+            campaigns: c.campaigns?.map((campaignId) => ({ id: validateMetaId(campaignId, "campaign") })),
           })),
         ),
       };
@@ -131,6 +131,7 @@ export function registerABTestingTools(server: McpServer): void {
       fields: z.array(z.string()).optional(),
     },
     async ({ study_id, fields }) => {
+      const id = validateMetaId(study_id, "study");
       const allFields = [
         ...STUDY_DEFAULT_FIELDS,
         "cells{id,name,treatment_percentage,campaigns,adsets}",
@@ -139,7 +140,7 @@ export function registerABTestingTools(server: McpServer): void {
       const fieldsParam = buildFieldsParam(fields, allFields);
 
       const study = await metaApiClient.get<AdStudy>(
-        `/${study_id}`,
+        `/${id}`,
         { fields: fieldsParam },
       );
 

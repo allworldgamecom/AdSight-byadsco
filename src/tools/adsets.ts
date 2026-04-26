@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { normalizeAccountId } from "../utils/format.js";
+import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { ADSET_DEFAULT_FIELDS } from "../meta/types/adset.js";
 import { AD_DEFAULT_FIELDS } from "../meta/types/ad.js";
@@ -388,7 +388,7 @@ export function registerAdSetTools(server: McpServer): void {
     },
     async ({ account_id, limit, campaign_id, status_filter }) => {
       const path = campaign_id
-        ? `/${campaign_id}/adsets`
+        ? `/${validateMetaId(campaign_id, "campaign")}/adsets`
         : `/${normalizeAccountId(account_id)}/adsets`;
 
       const fieldsParam = buildFieldsParam(undefined, [...ADSET_DEFAULT_FIELDS]);
@@ -434,8 +434,9 @@ export function registerAdSetTools(server: McpServer): void {
       fields: z.array(z.string()).optional(),
     },
     async ({ adset_id, fields }) => {
+      const id = validateMetaId(adset_id, "adset");
       const fieldsParam = buildAdSetDetailsFields(fields);
-      const adset = await metaApiClient.get<AdSet>(`/${adset_id}`, { fields: fieldsParam });
+      const adset = await metaApiClient.get<AdSet>(`/${id}`, { fields: fieldsParam });
       const targetingSummary = adset.targeting ? JSON.stringify(adset.targeting, null, 2) : "N/A";
 
       return {
@@ -468,15 +469,18 @@ export function registerAdSetTools(server: McpServer): void {
         throw new Error("idempotency_key is required when dry_run is false.");
       }
 
+      const accountPath = normalizeAccountId(account_id);
+      const sourceAdsetIdValidated = validateMetaId(source_adset_id, "adset");
+
       const requestSignature = JSON.stringify({
-        account_id,
-        source_adset_id,
+        account_id: accountPath,
+        source_adset_id: sourceAdsetIdValidated,
         target_adset,
         creative_overrides,
         reuse_source_media,
       });
       const cacheKey = idempotency_key
-        ? `${idempotency_key}:${account_id}:${source_adset_id}:${target_adset.name}`
+        ? `${idempotency_key}:${accountPath}:${sourceAdsetIdValidated}:${target_adset.name}`
         : undefined;
 
       if (cacheKey) {
@@ -496,7 +500,7 @@ export function registerAdSetTools(server: McpServer): void {
       }
 
       const sourceAdsetFields = buildAdSetDetailsFields(undefined);
-      const sourceAdset = await metaApiClient.get<AdSet>(`/${source_adset_id}`, {
+      const sourceAdset = await metaApiClient.get<AdSet>(`/${sourceAdsetIdValidated}`, {
         fields: sourceAdsetFields,
       });
 
@@ -515,7 +519,7 @@ export function registerAdSetTools(server: McpServer): void {
 
       const adsFieldsParam = buildFieldsParam(undefined, [...AD_DEFAULT_FIELDS, "tracking_specs"]);
       const sourceAds = await metaApiClient.getPaginated<Ad>(
-        `/${source_adset_id}/ads`,
+        `/${sourceAdsetIdValidated}/ads`,
         { fields: adsFieldsParam, limit: 100 },
         500,
       );
@@ -783,10 +787,11 @@ export function registerAdSetTools(server: McpServer): void {
       optimization_goal, billing_event, bid_amount, bid_strategy, targeting,
       start_time, end_time, promoted_object,
     }) => {
-      const id = normalizeAccountId(account_id);
+      const accountPath = normalizeAccountId(account_id);
+      const campaignIdValidated = validateMetaId(campaign_id, "campaign");
 
       const body: Record<string, string | number | boolean> = {
-        campaign_id,
+        campaign_id: campaignIdValidated,
         name,
         destination_type,
         status,
@@ -803,13 +808,13 @@ export function registerAdSetTools(server: McpServer): void {
       if (end_time) body.end_time = end_time;
       if (promoted_object) body.promoted_object = JSON.stringify(promoted_object);
 
-      const result = await metaApiClient.postForm<{ id: string }>(`/${id}/adsets`, body);
+      const result = await metaApiClient.postForm<{ id: string }>(`/${accountPath}/adsets`, body);
 
       return {
         content: [
           {
             type: "text",
-            text: `Ad set created successfully!\nID: ${result.id}\nName: ${name}\nCampaign: ${campaign_id}\nStatus: ${status}\nOptimization: ${optimization_goal}`,
+            text: `Ad set created successfully!\nID: ${result.id}\nName: ${name}\nCampaign: ${campaignIdValidated}\nStatus: ${status}\nOptimization: ${optimization_goal}`,
           },
         ],
       };
@@ -833,6 +838,7 @@ export function registerAdSetTools(server: McpServer): void {
       end_time: z.string().optional(),
     },
     async ({ adset_id, name, status, destination_type, daily_budget, lifetime_budget, targeting, bid_amount, bid_strategy, end_time }) => {
+      const id = validateMetaId(adset_id, "adset");
       const body: Record<string, string | number | boolean> = {};
       if (name !== undefined) body.name = name;
       if (status !== undefined) body.status = status;
@@ -844,11 +850,11 @@ export function registerAdSetTools(server: McpServer): void {
       if (bid_strategy !== undefined) body.bid_strategy = bid_strategy;
       if (end_time !== undefined) body.end_time = end_time;
 
-      await metaApiClient.postForm<{ success: boolean }>(`/${adset_id}`, body);
+      await metaApiClient.postForm<{ success: boolean }>(`/${id}`, body);
 
       return {
         content: [
-          { type: "text", text: `Ad set ${adset_id} updated successfully.\nChanges: ${JSON.stringify(body)}` },
+          { type: "text", text: `Ad set ${id} updated successfully.\nChanges: ${JSON.stringify(body)}` },
         ],
       };
     },
@@ -862,13 +868,14 @@ export function registerAdSetTools(server: McpServer): void {
       adset_id: z.string().describe("Ad set ID to delete"),
     },
     async ({ adset_id }) => {
-      await metaApiClient.postForm<{ success: boolean }>(`/${adset_id}`, {
+      const id = validateMetaId(adset_id, "adset");
+      await metaApiClient.postForm<{ success: boolean }>(`/${id}`, {
         status: "DELETED",
       });
 
       return {
         content: [
-          { type: "text", text: `Ad set ${adset_id} has been deleted (status set to DELETED).` },
+          { type: "text", text: `Ad set ${id} has been deleted (status set to DELETED).` },
         ],
       };
     },

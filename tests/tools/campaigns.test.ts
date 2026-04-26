@@ -39,7 +39,7 @@ describe("registerCampaignTools", () => {
       const mockData = {
         data: [
           {
-            id: "camp_1",
+            id: "1001",
             name: "Campaign 1",
             status: "ACTIVE",
             objective: "OUTCOME_TRAFFIC",
@@ -90,7 +90,7 @@ describe("registerCampaignTools", () => {
       const server = createMockMcpServer();
       registerCampaignTools(server as never);
 
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse({ id: "camp_new_123" })));
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse({ id: "1000123" })));
 
       const handler = server._registeredTools[2].handler;
       const result = await handler({
@@ -106,7 +106,7 @@ describe("registerCampaignTools", () => {
       }) as { content: Array<{ type: string; text: string }> };
 
       expect(result.content[0].text).toContain("Campaign created successfully");
-      expect(result.content[0].text).toContain("camp_new_123");
+      expect(result.content[0].text).toContain("1000123");
     });
   });
 
@@ -119,7 +119,7 @@ describe("registerCampaignTools", () => {
 
       const handler = server._registeredTools[3].handler;
       const result = await handler({
-        campaign_id: "camp_123",
+        campaign_id: "100123",
         name: "Updated Name",
         status: "PAUSED",
         daily_budget: undefined,
@@ -139,12 +139,12 @@ describe("registerCampaignTools", () => {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse({ success: true })));
 
       const handler = server._registeredTools[4].handler;
-      const result = await handler({ campaign_id: "camp_123" }) as {
+      const result = await handler({ campaign_id: "100123" }) as {
         content: Array<{ type: string; text: string }>;
       };
 
       expect(result.content[0].text).toContain("deleted");
-      expect(result.content[0].text).toContain("camp_123");
+      expect(result.content[0].text).toContain("100123");
 
       // Verify status is set to DELETED in the form body
       const call = vi.mocked(fetch).mock.calls[0];

@@ -47,8 +47,14 @@ describe("validateMetaId", () => {
     expect(validateMetaId("1", "campaign_id")).toBe("1");
   });
 
-  it("rejects act_ prefixed ids (use normalizeAccountId for those)", () => {
-    expect(() => validateMetaId("act_123")).toThrow(/Invalid Meta id/);
+  it("accepts an act_ prefixed account id", () => {
+    expect(validateMetaId("act_123456789", "object_id")).toBe("act_123456789");
+  });
+
+  it("accepts a post / comment id with the <page>_<id> form", () => {
+    expect(validateMetaId("123456789_987654321", "post")).toBe(
+      "123456789_987654321",
+    );
   });
 
   it("rejects junk", () => {
@@ -56,6 +62,9 @@ describe("validateMetaId", () => {
     expect(() => validateMetaId("123/x")).toThrow();
     expect(() => validateMetaId("")).toThrow();
     expect(() => validateMetaId("123 456")).toThrow();
+    expect(() => validateMetaId("act_123/insights")).toThrow();
+    expect(() => validateMetaId("123_456_789")).toThrow();
+    expect(() => validateMetaId("act_act_123")).toThrow();
   });
 
   it("propagates the kind label in the error", () => {
