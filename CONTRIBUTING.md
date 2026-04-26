@@ -54,6 +54,14 @@ A separate CI job runs [gitleaks](https://github.com/gitleaks/gitleaks) against 
 - **Zod schemas** for every tool input. The MCP SDK relies on them for both validation and the JSON Schema served to clients.
 - **Pino structured logs.** Use `event=...` keys for anything an operator might grep for; never log a Meta token in plaintext (`maskToken()` exists for this).
 
+## Adding a new tool
+
+If you want to expose a Meta Marketing API endpoint that the 80 built-in tools don't cover, see the full walkthrough in [docs/adding-a-tool.md](docs/adding-a-tool.md). Quick summary:
+
+- New file under [src/tools/](src/tools/) (or extend an existing category) exporting a `register*Tools(server)` function that calls `server.tool(name, description, zodSchema, handler)`.
+- The handler **must** route every Graph API call through `metaApiClient` ([src/meta/client.ts](src/meta/client.ts)) — never `fetch` directly. The shared client is what gives you bucketed rate-limiting, the circuit breaker, write pacing, and Meta-error → `McpError` classification.
+- Register the new module in [src/tools/index.ts](src/tools/index.ts) and bump the count in [tests/tools/registration.test.ts](tests/tools/registration.test.ts). Mirror the source path under `tests/tools/` with a vitest using the shared mocks in [tests/setup.ts](tests/setup.ts).
+
 ## Auth surface — extra scrutiny
 
 Changes under [src/auth/](src/auth/) and [src/transport/security-config.ts](src/transport/security-config.ts) carry higher risk. Even small changes here:
