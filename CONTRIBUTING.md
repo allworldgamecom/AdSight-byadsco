@@ -107,10 +107,10 @@ Two automated paths run independently:
 
     ```bash
     git checkout main && git pull
-    gh release create vX.Y.Z --target main --generate-notes --verify-tag
+    gh release create vX.Y.Z --target main --generate-notes
     ```
 
-    `--target main` tells `gh release create` to make the tag at the latest commit on `main` (the squash merge from step 2). `--verify-tag` fails fast if the tag already exists. `--generate-notes` populates the release body from the merged PRs since the previous tag.
+    `--target main` tells `gh release create` to make the tag at the latest commit on `main` (the squash merge from step 2). `--generate-notes` populates the release body from the merged PRs since the previous tag. If a release for that tag already exists `gh` errors out with HTTP 422, which is the collision check we want — do **not** add `--verify-tag`, that flag does the opposite (aborts when the tag does *not* exist remotely).
 
 4. **Watch `publish.yml`:**
 
