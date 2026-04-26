@@ -90,10 +90,14 @@ function renderConsentPage(ctx: ConsentContext): string {
               ? '<span class="badge badge-warn">expirado</span>'
               : "";
             const kind = t.kind === "system_user" ? "system" : "personal";
+            const businessChip = t.businessName
+              ? `<span class="badge badge-bm" title="Business Manager">${escapeHtml(t.businessName)}</span>`
+              : "";
             return `<label class="token-row${t.name === ctx.activeName ? " active" : ""}">
               <input type="radio" name="token" value="${escapeHtml(t.name)}" ${checked} form="approve-form" />
               <span class="token-name">${escapeHtml(t.name)}</span>
               <span class="badge">${kind}</span>
+              ${businessChip}
               ${expired}
               <span class="token-expiry">${expiry}</span>
             </label>`;
@@ -139,6 +143,7 @@ function renderConsentPage(ctx: ConsentContext): string {
     .token-expiry{color:#666;font-size:0.8rem}
     .badge{background:#222;color:#888;padding:0.1rem 0.4rem;border-radius:4px;font-size:0.7rem;text-transform:uppercase}
     .badge-warn{background:#3b1111;color:#fca5a5}
+    .badge-bm{background:#1a2f3f;color:#6cb4ee;text-transform:none;max-width:14ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .no-tokens{color:#888;background:#111;border-radius:8px;padding:1rem;text-align:center;font-size:0.9rem}
     details{background:#111;border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem}
     details summary{cursor:pointer;color:#6cb4ee;font-size:0.9rem}

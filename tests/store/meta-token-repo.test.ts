@@ -175,4 +175,32 @@ describe("InMemoryMetaTokenRepo", () => {
       /not found for user/,
     );
   });
+
+  it("persists businessId and businessName and exposes them in summaries", async () => {
+    await repo.saveToken(
+      makeInput({
+        name: "client_acme",
+        kind: "system_user",
+        expiresAt: null,
+        businessId: "1234567890",
+        businessName: "Acme Corp",
+      }),
+    );
+
+    const tokens = await repo.listTokens("fb-1");
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0]).toMatchObject({
+      name: "client_acme",
+      businessId: "1234567890",
+      businessName: "Acme Corp",
+    });
+  });
+
+  it("defaults businessId and businessName to null when not provided", async () => {
+    await repo.saveToken(makeInput({ name: "no-bm" }));
+
+    const tokens = await repo.listTokens("fb-1");
+    expect(tokens[0].businessId).toBeNull();
+    expect(tokens[0].businessName).toBeNull();
+  });
 });

@@ -3,6 +3,7 @@ import {
   buildAuthorizeUrl,
   exchangeCodeForToken,
   exchangeForLongLivedToken,
+  fetchPrimaryBusiness,
   fetchProfile,
   loadMetaOAuthConfig,
   validateToken,
@@ -124,6 +125,11 @@ export function mountAuthRoutes(
         return;
       }
 
+      const business = await fetchPrimaryBusiness(
+        longLived.accessToken,
+        config.apiVersion,
+      );
+
       await upsertUser(profile.id, profile);
       await saveToken({
         fbUserId: profile.id,
@@ -133,6 +139,8 @@ export function mountAuthRoutes(
         expiresAt: longLived.expiresAt,
         metaUserId: profile.id,
         metaUserName: profile.name,
+        businessId: business?.id ?? null,
+        businessName: business?.name ?? null,
         setAsDefault: !(await getDefaultTokenName(profile.id)),
       });
 
@@ -216,6 +224,8 @@ export function mountAuthRoutes(
         return;
       }
 
+      const business = await fetchPrimaryBusiness(token);
+
       await saveToken({
         fbUserId: session.fbUserId,
         name,
@@ -224,6 +234,8 @@ export function mountAuthRoutes(
         expiresAt: null,
         metaUserId: validation.profile.id,
         metaUserName: validation.profile.name,
+        businessId: business?.id ?? null,
+        businessName: business?.name ?? null,
       });
 
       const returnTo = safeReturnTo(req.body?.return);
