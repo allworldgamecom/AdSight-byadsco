@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { normalizeAccountId, truncateResponse } from "../utils/format.js";
+import { normalizeAccountId, truncateResponse, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { INSIGHTS_DEFAULT_FIELDS } from "../meta/types/insights.js";
 import type { InsightsResult, MetaApiResponse } from "../meta/types/index.js";
@@ -82,6 +82,7 @@ export function registerInsightsTools(server: McpServer): void {
       fields, action_attribution_windows, use_unified_attribution_setting,
       filtering, time_increment, limit,
     }) => {
+      const objectId = validateMetaId(object_id, "object");
       enforceInsightsGuardrails({
         level,
         breakdowns,
@@ -112,7 +113,7 @@ export function registerInsightsTools(server: McpServer): void {
       if (time_increment !== undefined) params.time_increment = String(time_increment);
 
       const response = await metaApiClient.get<MetaApiResponse<InsightsResult>>(
-        `/${object_id}/insights`,
+        `/${objectId}/insights`,
         params,
       );
 

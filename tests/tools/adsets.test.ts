@@ -44,9 +44,9 @@ describe("registerAdSetTools", () => {
       registerAdSetTools(server as never);
 
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse({
-        id: "adset_1",
+        id: "2001",
         name: "Honduras - Mujeres",
-        campaign_id: "camp_1",
+        campaign_id: "1001",
         status: "PAUSED",
         effective_status: "PAUSED",
         promoted_object: { pixel_id: "px_1" },
@@ -54,7 +54,7 @@ describe("registerAdSetTools", () => {
 
       const handler = server._registeredTools[1].handler;
       const result = await handler({
-        adset_id: "adset_1",
+        adset_id: "2001",
         fields: ["promoted_object"],
       }) as { content: Array<{ type: string; text: string }> };
 
@@ -82,9 +82,9 @@ describe("registerAdSetTools", () => {
 
       vi.stubGlobal("fetch", vi.fn()
         .mockResolvedValueOnce(mockFetchResponse({
-          id: "adset_src",
+          id: "2099",
           name: "Honduras - Mujeres",
-          campaign_id: "camp_1",
+          campaign_id: "1001",
           status: "ACTIVE",
           effective_status: "ACTIVE",
           daily_budget: "500",
@@ -106,27 +106,27 @@ describe("registerAdSetTools", () => {
         .mockResolvedValueOnce(mockFetchResponse({
           data: [
             {
-              id: "ad_1",
+              id: "3001",
               name: "Honduras - Mujeres__flyer_1",
-              adset_id: "adset_src",
-              campaign_id: "camp_1",
+              adset_id: "2099",
+              campaign_id: "1001",
               status: "ACTIVE",
               effective_status: "ACTIVE",
-              creative: { id: "crt_1" },
+              creative: { id: "4001" },
               created_time: "2026-03-01T00:00:00-0500",
               updated_time: "2026-03-01T00:00:00-0500",
             },
           ],
         }))
         .mockResolvedValueOnce(mockFetchResponse({
-          id: "crt_1",
+          id: "4001",
           name: "Creative HN",
           title: "Original headline",
           body: "Original message",
           image_hash: "img_hash_1",
           call_to_action_type: "APPLY_NOW",
           object_story_spec: {
-            page_id: "page_1",
+            page_id: "6001",
             link_data: {
               link: "https://ugc.byads.co/",
               message: "Original message",
@@ -144,7 +144,7 @@ describe("registerAdSetTools", () => {
       const handler = server._registeredTools[2].handler;
       const result = await handler({
         account_id: "act_123",
-        source_adset_id: "adset_src",
+        source_adset_id: "2099",
         target_adset: {
           name: "Chile - Mujeres",
           geo_override: { countries: ["CL"] },
@@ -156,7 +156,7 @@ describe("registerAdSetTools", () => {
         },
         creative_overrides: [
           {
-            source_ad_id: "ad_1",
+            source_ad_id: "3001",
             headline: "Headline Chile",
             message: "Mensaje Chile",
             description: "Descripcion Chile",
@@ -192,9 +192,9 @@ describe("registerAdSetTools", () => {
 
       vi.stubGlobal("fetch", vi.fn()
         .mockResolvedValueOnce(mockFetchResponse({
-          id: "adset_src_exec",
+          id: "2999",
           name: "Honduras - Mujeres",
-          campaign_id: "camp_1",
+          campaign_id: "1001",
           status: "ACTIVE",
           effective_status: "ACTIVE",
           daily_budget: "500",
@@ -210,27 +210,27 @@ describe("registerAdSetTools", () => {
         .mockResolvedValueOnce(mockFetchResponse({
           data: [
             {
-              id: "ad_exec_1",
+              id: "3099",
               name: "Honduras - Mujeres__flyer_1",
-              adset_id: "adset_src_exec",
-              campaign_id: "camp_1",
+              adset_id: "2999",
+              campaign_id: "1001",
               status: "ACTIVE",
               effective_status: "ACTIVE",
-              creative: { id: "crt_exec_1" },
+              creative: { id: "4999" },
               created_time: "2026-03-01T00:00:00-0500",
               updated_time: "2026-03-01T00:00:00-0500",
             },
           ],
         }))
         .mockResolvedValueOnce(mockFetchResponse({
-          id: "crt_exec_1",
+          id: "4999",
           name: "Creative HN",
           title: "Original headline",
           body: "Original message",
           image_hash: "img_hash_1",
           call_to_action_type: "APPLY_NOW",
           object_story_spec: {
-            page_id: "page_1",
+            page_id: "6001",
             link_data: {
               link: "https://ugc.byads.co/",
               message: "Original message",
@@ -244,14 +244,14 @@ describe("registerAdSetTools", () => {
             },
           },
         }))
-        .mockResolvedValueOnce(mockFetchResponse({ id: "adset_new_1" }))
-        .mockResolvedValueOnce(mockFetchResponse({ id: "crt_new_1" }))
-        .mockResolvedValueOnce(mockFetchResponse({ id: "ad_new_1" })));
+        .mockResolvedValueOnce(mockFetchResponse({ id: "20001" }))
+        .mockResolvedValueOnce(mockFetchResponse({ id: "40001" }))
+        .mockResolvedValueOnce(mockFetchResponse({ id: "30001" })));
 
       const handler = server._registeredTools[2].handler;
       const input = {
         account_id: "act_123",
-        source_adset_id: "adset_src_exec",
+        source_adset_id: "2999",
         target_adset: {
           name: "Chile - Mujeres",
           geo_override: { countries: ["CL"] },
@@ -263,7 +263,7 @@ describe("registerAdSetTools", () => {
         },
         creative_overrides: [
           {
-            source_ad_id: "ad_exec_1",
+            source_ad_id: "3099",
             headline: "Headline Chile",
             message: "Mensaje Chile",
             description: "Descripcion Chile",
@@ -281,9 +281,9 @@ describe("registerAdSetTools", () => {
         created_ads: Array<{ id?: string }>;
       };
 
-      expect(firstPayload.new_adset.id).toBe("adset_new_1");
-      expect(firstPayload.created_creatives[0]?.id).toBe("crt_new_1");
-      expect(firstPayload.created_ads[0]?.id).toBe("ad_new_1");
+      expect(firstPayload.new_adset.id).toBe("20001");
+      expect(firstPayload.created_creatives[0]?.id).toBe("40001");
+      expect(firstPayload.created_ads[0]?.id).toBe("30001");
       expect(vi.mocked(fetch)).toHaveBeenCalledTimes(6);
 
       const second = await handler(input) as { content: Array<{ type: string; text: string }> };

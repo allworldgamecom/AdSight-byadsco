@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { normalizeAccountId } from "../utils/format.js";
+import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { AUDIENCE_DEFAULT_FIELDS } from "../meta/types/audience.js";
 import type { CustomAudience, MetaApiResponse } from "../meta/types/index.js";
@@ -54,10 +54,11 @@ export function registerAudienceTools(server: McpServer): void {
       fields: z.array(z.string()).optional(),
     },
     async ({ audience_id, fields }) => {
+      const id = validateMetaId(audience_id, "audience");
       const fieldsParam = buildFieldsParam(fields, [...AUDIENCE_DEFAULT_FIELDS]);
 
       const audience = await metaApiClient.get<CustomAudience>(
-        `/${audience_id}`,
+        `/${id}`,
         { fields: fieldsParam },
       );
 
@@ -140,12 +141,13 @@ export function registerAudienceTools(server: McpServer): void {
       description: z.string().optional(),
     },
     async ({ account_id, name, origin_audience_id, ratio, country, description }) => {
-      const id = normalizeAccountId(account_id);
+      const accountPath = normalizeAccountId(account_id);
+      const originAudienceIdValidated = validateMetaId(origin_audience_id, "audience");
 
       const body: Record<string, string | number | boolean> = {
         name,
         subtype: "LOOKALIKE",
-        origin_audience_id,
+        origin_audience_id: originAudienceIdValidated,
         lookalike_spec: JSON.stringify({
           ratio,
           country,
@@ -156,7 +158,7 @@ export function registerAudienceTools(server: McpServer): void {
       if (description) body.description = description;
 
       const result = await metaApiClient.postForm<{ id: string }>(
-        `/${id}/customaudiences`,
+        `/${accountPath}/customaudiences`,
         body,
       );
 
@@ -164,7 +166,7 @@ export function registerAudienceTools(server: McpServer): void {
         content: [
           {
             type: "text",
-            text: `Lookalike audience created!\nID: ${result.id}\nName: ${name}\nSource: ${origin_audience_id}\nRatio: ${(ratio * 100).toFixed(0)}%\nCountry: ${country}`,
+            text: `Lookalike audience created!\nID: ${result.id}\nName: ${name}\nSource: ${originAudienceIdValidated}\nRatio: ${(ratio * 100).toFixed(0)}%\nCountry: ${country}`,
           },
         ],
       };
@@ -179,11 +181,12 @@ export function registerAudienceTools(server: McpServer): void {
       audience_id: z.string().describe("Custom audience ID to delete"),
     },
     async ({ audience_id }) => {
-      await metaApiClient.delete<{ success: boolean }>(`/${audience_id}`);
+      const id = validateMetaId(audience_id, "audience");
+      await metaApiClient.delete<{ success: boolean }>(`/${id}`);
 
       return {
         content: [
-          { type: "text", text: `Audience ${audience_id} deleted successfully.` },
+          { type: "text", text: `Audience ${id} deleted successfully.` },
         ],
       };
     },

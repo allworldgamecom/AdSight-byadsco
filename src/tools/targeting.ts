@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { normalizeAccountId } from "../utils/format.js";
+import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import type {
   Interest,
   Behavior,
@@ -277,7 +277,7 @@ export function registerTargetingTools(server: McpServer): void {
       const params: Record<string, string | number | boolean> = {};
 
       if (ad_id) {
-        path = `/${ad_id}/targetingsentencelines`;
+        path = `/${validateMetaId(ad_id, "ad")}/targetingsentencelines`;
       } else if (account_id && targeting_spec) {
         const id = normalizeAccountId(account_id);
         path = `/${id}/targetingsentencelines`;

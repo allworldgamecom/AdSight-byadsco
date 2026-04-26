@@ -53,7 +53,7 @@ describe("registerInsightsTools", () => {
 
       const handler = server._registeredTools[0].handler;
       const result = await handler({
-        object_id: "camp_123",
+        object_id: "100123",
         level: undefined,
         time_range: undefined,
         date_preset: "last_30d",
@@ -77,7 +77,7 @@ describe("registerInsightsTools", () => {
 
       const handler = server._registeredTools[0].handler;
       const result = await handler({
-        object_id: "camp_123",
+        object_id: "100123",
         level: undefined,
         time_range: undefined,
         date_preset: undefined,
@@ -113,7 +113,7 @@ describe("registerInsightsTools", () => {
 
       const handler = server._registeredTools[0].handler;
       const result = await handler({
-        object_id: "camp_123",
+        object_id: "100123",
         level: undefined,
         time_range: undefined,
         date_preset: undefined,

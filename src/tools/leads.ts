@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
 import { buildFieldsParam } from "../utils/validation.js";
-import { truncateResponse } from "../utils/format.js";
+import { truncateResponse, validateMetaId } from "../utils/format.js";
 import { LEAD_FORM_DEFAULT_FIELDS, LEAD_DEFAULT_FIELDS } from "../meta/types/lead.js";
 import type { LeadForm, Lead, MetaApiResponse } from "../meta/types/index.js";
 
@@ -17,10 +17,11 @@ export function registerLeadTools(server: McpServer): void {
       fields: z.array(z.string()).optional().describe("Fields to retrieve"),
     },
     async ({ page_id, limit, fields }) => {
+      const id = validateMetaId(page_id, "page");
       const fieldsParam = buildFieldsParam(fields, [...LEAD_FORM_DEFAULT_FIELDS]);
 
       const response = await metaApiClient.get<MetaApiResponse<LeadForm>>(
-        `/${page_id}/leadgen_forms`,
+        `/${id}/leadgen_forms`,
         { fields: fieldsParam, limit },
       );
       const forms = response.data ?? [];
@@ -64,6 +65,7 @@ export function registerLeadTools(server: McpServer): void {
         .describe("Filter leads (e.g., by time_created)"),
     },
     async ({ form_id, limit, fields, filtering }) => {
+      const id = validateMetaId(form_id, "lead_form");
       const fieldsParam = buildFieldsParam(fields, [...LEAD_DEFAULT_FIELDS]);
 
       const params: Record<string, string | number | boolean> = {
@@ -76,7 +78,7 @@ export function registerLeadTools(server: McpServer): void {
       }
 
       const response = await metaApiClient.get<MetaApiResponse<Lead>>(
-        `/${form_id}/leads`,
+        `/${id}/leads`,
         params,
       );
       const leads = response.data ?? [];
@@ -121,17 +123,18 @@ export function registerLeadTools(server: McpServer): void {
       fields: z.array(z.string()).optional(),
     },
     async ({ ad_id, limit, fields }) => {
+      const id = validateMetaId(ad_id, "ad");
       const fieldsParam = buildFieldsParam(fields, [...LEAD_DEFAULT_FIELDS]);
 
       const response = await metaApiClient.get<MetaApiResponse<Lead>>(
-        `/${ad_id}/leads`,
+        `/${id}/leads`,
         { fields: fieldsParam, limit },
       );
       const leads = response.data ?? [];
 
       if (leads.length === 0) {
         return {
-          content: [{ type: "text", text: `No leads found for ad ${ad_id}.` }],
+          content: [{ type: "text", text: `No leads found for ad ${id}.` }],
         };
       }
 
@@ -139,7 +142,7 @@ export function registerLeadTools(server: McpServer): void {
 
       return {
         content: [
-          { type: "text", text: `Found ${leads.length} lead(s) for ad ${ad_id}.` },
+          { type: "text", text: `Found ${leads.length} lead(s) for ad ${id}.` },
           { type: "text", text: jsonStr },
         ],
       };
@@ -167,6 +170,7 @@ export function registerLeadTools(server: McpServer): void {
       locale: z.string().optional().describe("Form locale (e.g., en_US)"),
     },
     async ({ page_id, name, questions, privacy_policy_url, follow_up_action_url, locale }) => {
+      const id = validateMetaId(page_id, "page");
       const body: Record<string, string | number | boolean> = {
         name,
         questions: JSON.stringify(questions),
@@ -177,7 +181,7 @@ export function registerLeadTools(server: McpServer): void {
       if (locale) body.locale = locale;
 
       const result = await metaApiClient.postForm<{ id: string }>(
-        `/${page_id}/leadgen_forms`,
+        `/${id}/leadgen_forms`,
         body,
       );
 
@@ -185,7 +189,7 @@ export function registerLeadTools(server: McpServer): void {
         content: [
           {
             type: "text",
-            text: `Lead form created successfully!\nID: ${result.id}\nName: ${name}\nQuestions: ${questions.length}\nPage: ${page_id}`,
+            text: `Lead form created successfully!\nID: ${result.id}\nName: ${name}\nQuestions: ${questions.length}\nPage: ${id}`,
           },
         ],
       };

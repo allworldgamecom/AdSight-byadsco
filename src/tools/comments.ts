@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { truncateResponse } from "../utils/format.js";
+import { truncateResponse, validateMetaId } from "../utils/format.js";
 import type { MetaApiResponse } from "../meta/types/index.js";
 
 interface AdComment {
@@ -31,19 +31,22 @@ export function registerCommentTools(server: McpServer): void {
         .describe("Filter: toplevel (only direct comments) or stream (all including replies)"),
     },
     async ({ ad_id, post_id, limit, filter }) => {
-      let objectId = post_id;
+      let objectId = post_id ? validateMetaId(post_id, "post") : undefined;
 
       // If ad_id provided, resolve to effective_object_story_id
       if (!objectId && ad_id) {
+        const adId = validateMetaId(ad_id, "ad");
         const ad = await metaApiClient.get<{ effective_object_story_id?: string }>(
-          `/${ad_id}`,
+          `/${adId}`,
           { fields: "effective_object_story_id" },
         );
-        objectId = ad.effective_object_story_id;
+        objectId = ad.effective_object_story_id
+          ? validateMetaId(ad.effective_object_story_id, "post")
+          : undefined;
         if (!objectId) {
           return {
             content: [
-              { type: "text", text: `Ad ${ad_id} has no associated post (effective_object_story_id not found).` },
+              { type: "text", text: `Ad ${adId} has no associated post (effective_object_story_id not found).` },
             ],
           };
         }
@@ -92,8 +95,9 @@ export function registerCommentTools(server: McpServer): void {
       is_hidden: z.boolean().default(true).describe("true to hide, false to unhide"),
     },
     async ({ comment_id, is_hidden }) => {
+      const id = validateMetaId(comment_id, "post");
       await metaApiClient.postForm<{ success: boolean }>(
-        `/${comment_id}`,
+        `/${id}`,
         { is_hidden },
       );
 
@@ -101,7 +105,7 @@ export function registerCommentTools(server: McpServer): void {
         content: [
           {
             type: "text",
-            text: `Comment ${comment_id} ${is_hidden ? "hidden" : "unhidden"} successfully.`,
+            text: `Comment ${id} ${is_hidden ? "hidden" : "unhidden"} successfully.`,
           },
         ],
       };
@@ -117,8 +121,9 @@ export function registerCommentTools(server: McpServer): void {
       message: z.string().min(1).describe("Reply message text"),
     },
     async ({ comment_id, message }) => {
+      const id = validateMetaId(comment_id, "post");
       const result = await metaApiClient.postForm<{ id: string }>(
-        `/${comment_id}/comments`,
+        `/${id}/comments`,
         { message },
       );
 
@@ -141,11 +146,12 @@ export function registerCommentTools(server: McpServer): void {
       comment_id: z.string().describe("Comment ID to delete"),
     },
     async ({ comment_id }) => {
-      await metaApiClient.delete<{ success: boolean }>(`/${comment_id}`);
+      const id = validateMetaId(comment_id, "post");
+      await metaApiClient.delete<{ success: boolean }>(`/${id}`);
 
       return {
         content: [
-          { type: "text", text: `Comment ${comment_id} deleted successfully.` },
+          { type: "text", text: `Comment ${id} deleted successfully.` },
         ],
       };
     },

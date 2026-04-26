@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { truncateResponse } from "../utils/format.js";
+import { truncateResponse, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { INSIGHTS_DEFAULT_FIELDS } from "../meta/types/insights.js";
 import type { InsightsResult, MetaApiResponse } from "../meta/types/index.js";
@@ -90,6 +90,7 @@ export function registerReportTools(server: McpServer): void {
       object_id, level, time_range, date_preset, breakdowns, fields,
       use_unified_attribution_setting, time_increment,
     }) => {
+      const objectId = validateMetaId(object_id, "object");
       enforceInsightsGuardrails({
         level,
         breakdowns,
@@ -109,7 +110,7 @@ export function registerReportTools(server: McpServer): void {
       if (time_increment !== undefined) params.time_increment = String(time_increment);
 
       const result = await metaApiClient.postForm<AsyncReportRun>(
-        `/${object_id}/insights`,
+        `/${objectId}/insights`,
         params,
       );
 
@@ -134,17 +135,18 @@ export function registerReportTools(server: McpServer): void {
       report_run_id: z.string().describe("Report run ID from create_async_report"),
     },
     async ({ report_run_id }) => {
-      enforceMinPollInterval(report_run_id);
+      const id = validateMetaId(report_run_id, "report_run");
+      enforceMinPollInterval(id);
 
       const status = await metaApiClient.get<ReportRunStatus>(
-        `/${report_run_id}`,
+        `/${id}`,
         {
           fields:
             "id,async_status,async_percent_completion,date_start,date_stop,error_code,error_subcode,error_message,error_user_title,error_user_msg",
         },
       );
 
-      return { content: [{ type: "text", text: formatStatus(report_run_id, status) }] };
+      return { content: [{ type: "text", text: formatStatus(id, status) }] };
     },
   );
 
@@ -157,8 +159,9 @@ export function registerReportTools(server: McpServer): void {
       limit: z.number().min(1).max(1000).default(500),
     },
     async ({ report_run_id, limit }) => {
+      const id = validateMetaId(report_run_id, "report_run");
       const response = await metaApiClient.get<MetaApiResponse<InsightsResult>>(
-        `/${report_run_id}/insights`,
+        `/${id}/insights`,
         { limit },
       );
       const results = response.data ?? [];
@@ -222,6 +225,7 @@ export function registerReportTools(server: McpServer): void {
       use_unified_attribution_setting, time_increment,
       max_wait_seconds, poll_interval_seconds, result_limit,
     }) => {
+      const objectId = validateMetaId(object_id, "object");
       enforceInsightsGuardrails({
         level,
         breakdowns,
@@ -240,10 +244,10 @@ export function registerReportTools(server: McpServer): void {
       if (time_increment !== undefined) params.time_increment = String(time_increment);
 
       const created = await metaApiClient.postForm<AsyncReportRun>(
-        `/${object_id}/insights`,
+        `/${objectId}/insights`,
         params,
       );
-      const reportId = created.report_run_id ?? created.id;
+      const reportId = validateMetaId(created.report_run_id ?? created.id, "report_run");
 
       const deadline = Date.now() + max_wait_seconds * 1000;
       let interval = Math.max(MIN_POLL_INTERVAL_MS, poll_interval_seconds * 1000);

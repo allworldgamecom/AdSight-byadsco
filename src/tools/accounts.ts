@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { normalizeAccountId } from "../utils/format.js";
+import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import {
   AD_ACCOUNT_DEFAULT_FIELDS,
@@ -36,13 +36,14 @@ export function registerAccountTools(server: McpServer): void {
         .describe("Fields to include (defaults to standard set)"),
     },
     async ({ user_id, limit, fields }) => {
+      const userPath = user_id === "me" ? "me" : validateMetaId(user_id, "user");
       const fieldsParam = buildFieldsParam(
         fields,
         [...AD_ACCOUNT_DEFAULT_FIELDS],
       );
 
       const response = await metaApiClient.get<MetaApiResponse<AdAccount>>(
-        `/${user_id}/adaccounts`,
+        `/${userPath}/adaccounts`,
         { fields: fieldsParam, limit },
       );
 

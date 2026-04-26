@@ -47,28 +47,28 @@ describe("registerCreativeTools", () => {
       registerCreativeTools(server as never);
 
       const mockCreative = {
-        id: "crt_123",
+        id: "40123",
         name: "Spring Creative",
         status: "ACTIVE",
         call_to_action_type: "LEARN_MORE",
         link_url: "https://example.com",
-        effective_object_story_id: "page_1_post_9",
+        effective_object_story_id: "6001_9",
       };
 
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse(mockCreative)));
 
       const handler = server._registeredTools[1].handler;
       const result = await handler({
-        creative_id: "crt_123",
+        creative_id: "40123",
         fields: undefined,
       }) as { content: Array<{ type: string; text: string }> };
 
-      expect(result.content[0].text).toContain("Creative: Spring Creative (crt_123)");
+      expect(result.content[0].text).toContain("Creative: Spring Creative (40123)");
       expect(result.content[0].text).toContain("Status: ACTIVE");
       expect(result.content[0].text).toContain("CTA: LEARN_MORE");
 
       const url = new URL(vi.mocked(fetch).mock.calls[0][0] as string);
-      expect(url.pathname).toContain("/crt_123");
+      expect(url.pathname).toContain("/40123");
       expect(url.searchParams.get("fields")).toBe(
         "id,name,title,body,image_hash,image_url,thumbnail_url,object_story_spec,asset_feed_spec,call_to_action_type,link_url,effective_link_url,effective_object_story_id,status",
       );
@@ -79,13 +79,13 @@ describe("registerCreativeTools", () => {
       registerCreativeTools(server as never);
 
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse({
-        id: "crt_999",
+        id: "40999",
         name: "Custom Fields Creative",
       })));
 
       const handler = server._registeredTools[1].handler;
       await handler({
-        creative_id: "crt_999",
+        creative_id: "40999",
         fields: ["id", "name"],
       });
 
@@ -98,14 +98,14 @@ describe("registerCreativeTools", () => {
       registerCreativeTools(server as never);
 
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse({
-        id: "crt_video",
+        id: "4099",
         name: "Video Creative",
         status: "ACTIVE",
         call_to_action_type: "APPLY_NOW",
         object_story_spec: {
-          page_id: "page_1",
+          page_id: "6001",
           video_data: {
-            video_id: "vid_1",
+            video_id: "8001",
             call_to_action: {
               type: "APPLY_NOW",
               value: { link: "https://ugc.byads.co/chile" },
@@ -116,7 +116,7 @@ describe("registerCreativeTools", () => {
 
       const handler = server._registeredTools[1].handler;
       const result = await handler({
-        creative_id: "crt_video",
+        creative_id: "4099",
         fields: undefined,
       }) as { content: Array<{ type: string; text: string }> };
 
@@ -136,8 +136,8 @@ describe("registerCreativeTools", () => {
       await expect(handler({
         account_id: "act_123",
         name: "Video sin thumb",
-        page_id: "page_1",
-        video_id: "vid_123",
+        page_id: "6001",
+        video_id: "800123",
         image_hash: undefined,
         image_url: undefined,
         link_url: "https://example.com",

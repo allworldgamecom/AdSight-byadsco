@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { normalizeAccountId, truncateResponse } from "../utils/format.js";
+import { normalizeAccountId, truncateResponse, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { RULE_DEFAULT_FIELDS } from "../meta/types/rule.js";
 import type { AdRule, AdRuleHistory, MetaApiResponse } from "../meta/types/index.js";
@@ -136,10 +136,11 @@ export function registerRuleTools(server: McpServer): void {
       include_history: z.boolean().default(false).describe("Include rule execution history"),
     },
     async ({ rule_id, fields, include_history }) => {
+      const id = validateMetaId(rule_id, "rule");
       const fieldsParam = buildFieldsParam(fields, [...RULE_DEFAULT_FIELDS]);
 
       const rule = await metaApiClient.get<AdRule>(
-        `/${rule_id}`,
+        `/${id}`,
         { fields: fieldsParam },
       );
 
@@ -153,7 +154,7 @@ export function registerRuleTools(server: McpServer): void {
 
       if (include_history) {
         const historyResponse = await metaApiClient.get<MetaApiResponse<AdRuleHistory>>(
-          `/${rule_id}/history`,
+          `/${id}/history`,
           { limit: 50 },
         );
         const history = historyResponse.data ?? [];
@@ -207,17 +208,18 @@ export function registerRuleTools(server: McpServer): void {
         .optional(),
     },
     async ({ rule_id, name, status, evaluation_spec, execution_spec }) => {
+      const id = validateMetaId(rule_id, "rule");
       const body: Record<string, string | number | boolean> = {};
       if (name) body.name = name;
       if (status) body.status = status;
       if (evaluation_spec) body.evaluation_spec = JSON.stringify(evaluation_spec);
       if (execution_spec) body.execution_spec = JSON.stringify(execution_spec);
 
-      await metaApiClient.postForm<{ success: boolean }>(`/${rule_id}`, body);
+      await metaApiClient.postForm<{ success: boolean }>(`/${id}`, body);
 
       return {
         content: [
-          { type: "text", text: `Rule ${rule_id} updated successfully.` },
+          { type: "text", text: `Rule ${id} updated successfully.` },
         ],
       };
     },
@@ -231,11 +233,12 @@ export function registerRuleTools(server: McpServer): void {
       rule_id: z.string().describe("Rule ID to delete"),
     },
     async ({ rule_id }) => {
-      await metaApiClient.delete<{ success: boolean }>(`/${rule_id}`);
+      const id = validateMetaId(rule_id, "rule");
+      await metaApiClient.delete<{ success: boolean }>(`/${id}`);
 
       return {
         content: [
-          { type: "text", text: `Rule ${rule_id} deleted successfully.` },
+          { type: "text", text: `Rule ${id} deleted successfully.` },
         ],
       };
     },

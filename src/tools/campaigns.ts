@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { normalizeAccountId } from "../utils/format.js";
+import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { CAMPAIGN_DEFAULT_FIELDS } from "../meta/types/campaign.js";
 import type { Campaign, MetaApiResponse } from "../meta/types/index.js";
@@ -99,8 +99,9 @@ export function registerCampaignTools(server: McpServer): void {
       fields: z.array(z.string()).optional(),
     },
     async ({ campaign_id, fields }) => {
+      const id = validateMetaId(campaign_id, "campaign");
       const fieldsParam = buildFieldsParam(fields, [...CAMPAIGN_DEFAULT_FIELDS]);
-      const campaign = await metaApiClient.get<Campaign>(`/${campaign_id}`, {
+      const campaign = await metaApiClient.get<Campaign>(`/${id}`, {
         fields: fieldsParam,
       });
 
@@ -196,6 +197,7 @@ export function registerCampaignTools(server: McpServer): void {
       bid_strategy: bidStrategyEnum.optional(),
     },
     async ({ campaign_id, name, status, daily_budget, lifetime_budget, bid_strategy }) => {
+      const id = validateMetaId(campaign_id, "campaign");
       const body: Record<string, string | number | boolean> = {};
       if (name !== undefined) body.name = name;
       if (status !== undefined) body.status = status;
@@ -204,7 +206,7 @@ export function registerCampaignTools(server: McpServer): void {
       if (bid_strategy !== undefined) body.bid_strategy = bid_strategy;
 
       await metaApiClient.postForm<{ success: boolean }>(
-        `/${campaign_id}`,
+        `/${id}`,
         body,
       );
 
@@ -212,7 +214,7 @@ export function registerCampaignTools(server: McpServer): void {
         content: [
           {
             type: "text",
-            text: `Campaign ${campaign_id} updated successfully.\nChanges: ${JSON.stringify(body)}`,
+            text: `Campaign ${id} updated successfully.\nChanges: ${JSON.stringify(body)}`,
           },
         ],
       };
@@ -227,7 +229,8 @@ export function registerCampaignTools(server: McpServer): void {
       campaign_id: z.string().describe("Campaign ID to delete"),
     },
     async ({ campaign_id }) => {
-      await metaApiClient.postForm<{ success: boolean }>(`/${campaign_id}`, {
+      const id = validateMetaId(campaign_id, "campaign");
+      await metaApiClient.postForm<{ success: boolean }>(`/${id}`, {
         status: "DELETED",
       });
 
@@ -235,7 +238,7 @@ export function registerCampaignTools(server: McpServer): void {
         content: [
           {
             type: "text",
-            text: `Campaign ${campaign_id} has been deleted (status set to DELETED).`,
+            text: `Campaign ${id} has been deleted (status set to DELETED).`,
           },
         ],
       };
