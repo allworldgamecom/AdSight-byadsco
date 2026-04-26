@@ -10,7 +10,10 @@ export function getFirestore(): Firestore {
     process.env.FIRESTORE_PROJECT_ID?.trim() ||
     process.env.GOOGLE_CLOUD_PROJECT?.trim();
 
-  cachedClient = new Firestore(projectId ? { projectId } : {});
+  cachedClient = new Firestore({
+    ...(projectId ? { projectId } : {}),
+    ignoreUndefinedProperties: true,
+  });
   logger.info(
     { projectId: projectId ?? "(adc)", emulator: process.env.FIRESTORE_EMULATOR_HOST ?? null },
     "Firestore client initialized",
