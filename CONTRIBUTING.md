@@ -94,7 +94,38 @@ For **security** bugs: do **not** open a public issue. Follow [SECURITY.md](SECU
 
 ## Releasing
 
-The project deploys automatically to Cloud Run on every push to `main` via [.github/workflows/deploy.yml](.github/workflows/deploy.yml). There are no tagged releases yet. If we adopt them, this section will document the process.
+Two automated paths run independently:
+
+- **Deploy to Cloud Run** — every push to `main` triggers [.github/workflows/deploy.yml](.github/workflows/deploy.yml). Production updates immediately; there is no manual step.
+- **Publish to GitHub Packages** — every published GitHub Release triggers [.github/workflows/publish.yml](.github/workflows/publish.yml). Pushes the npm package to `npm.pkg.github.com` (`@byadsco/meta-ads-mcp`) and the container image to `ghcr.io/byadsco/meta-ads-mcp` tagged with the release semver.
+
+### Cutting a new release
+
+1. **Open a PR that bumps `version` in [package.json](package.json) only.** Use semver — `2.0.2` for fix-only, `2.1.0` for new features, `3.0.0` for breaking changes. Edit the `version` field by hand. **Do not run `npm version` locally** — it creates the git tag at the same time, which collides with the tag `gh release create` will make on the squash-merge commit and leaves the repo half-bumped.
+2. **Merge the PR.** Branch protection requires a CODEOWNERS review; since you can't review your own PR, admin bypass is fine for a version-only change.
+3. **Create the release on the merged commit:**
+
+    ```bash
+    git checkout main && git pull
+    gh release create vX.Y.Z --target main --generate-notes --verify-tag
+    ```
+
+    `--target main` tells `gh release create` to make the tag at the latest commit on `main` (the squash merge from step 2). `--verify-tag` fails fast if the tag already exists. `--generate-notes` populates the release body from the merged PRs since the previous tag.
+
+4. **Watch `publish.yml`:**
+
+    ```bash
+    gh run list --workflow="Publish to GitHub Packages" --limit 1
+    ```
+
+    When it goes green, verify the artifacts:
+
+    ```bash
+    docker pull ghcr.io/byadsco/meta-ads-mcp:X.Y.Z
+    npm view @byadsco/meta-ads-mcp@X.Y.Z --registry=https://npm.pkg.github.com
+    ```
+
+For a **prerelease** (`v3.0.0-rc.1`, `v3.0.0-beta.2`), pass `--prerelease` to `gh release create`. `publish.yml` detects the flag and (a) publishes the npm package under the `next` dist-tag instead of `latest`, and (b) skips emitting the `:latest` Docker tag — the semver-shaped tags still ship.
 
 ## Questions
 
