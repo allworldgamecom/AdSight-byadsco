@@ -8,7 +8,6 @@ export interface AuthCodeEntry {
   redirectUri: string;
   resource?: string;
   fbUserId?: string;
-  metaTokenName?: string;
   expiresAt: number;
 }
 

@@ -43,7 +43,6 @@ function getJwtSecret(): Uint8Array {
 
 export interface PendingAuthSession {
   fbUserId: string;
-  metaTokenName: string;
 }
 
 export class MetaAdsOAuthProvider implements OAuthServerProvider {
@@ -79,7 +78,6 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
       redirectUri: params.redirectUri,
       resource: params.resource?.href,
       fbUserId: pending?.fbUserId,
-      metaTokenName: pending?.metaTokenName,
       expiresAt: Math.floor(Date.now() / 1000) + 600,
     });
 
@@ -140,7 +138,6 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
       resource:
         resource ?? (entry.resource ? new URL(entry.resource) : undefined),
       fbUserId: entry.fbUserId,
-      metaTokenName: entry.metaTokenName,
     });
   }
 
@@ -168,10 +165,6 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
       resource,
       fbUserId:
         typeof payload.fb_user_id === "string" ? payload.fb_user_id : undefined,
-      metaTokenName:
-        typeof payload.meta_token_name === "string"
-          ? payload.meta_token_name
-          : undefined,
     });
   }
 
@@ -189,9 +182,6 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
     const extra: Record<string, unknown> = {};
     if (typeof payload.fb_user_id === "string") {
       extra.fbUserId = payload.fb_user_id;
-    }
-    if (typeof payload.meta_token_name === "string") {
-      extra.metaTokenName = payload.meta_token_name;
     }
 
     const authInfo: AuthInfo = {
@@ -218,7 +208,6 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
     clientId: string;
     resource?: URL;
     fbUserId?: string;
-    metaTokenName?: string;
   }): Promise<OAuthTokens> {
     const secret = getJwtSecret();
     const now = Math.floor(Date.now() / 1000);
@@ -229,7 +218,6 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
     };
     if (input.resource) claims.resource = input.resource.href;
     if (input.fbUserId) claims.fb_user_id = input.fbUserId;
-    if (input.metaTokenName) claims.meta_token_name = input.metaTokenName;
 
     const accessToken = await new SignJWT(claims)
       .setProtectedHeader({ alg: "HS256" })
@@ -242,7 +230,6 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
       type: "refresh",
     };
     if (input.fbUserId) refreshClaims.fb_user_id = input.fbUserId;
-    if (input.metaTokenName) refreshClaims.meta_token_name = input.metaTokenName;
 
     const refreshToken = await new SignJWT(refreshClaims)
       .setProtectedHeader({ alg: "HS256" })

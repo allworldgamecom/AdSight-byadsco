@@ -37,12 +37,9 @@ describe("MetaAdsOAuthProvider", () => {
     resetOAuthProviderForTests();
   });
 
-  it("issues a code that can be exchanged for tokens including fb_user_id", async () => {
+  it("issues a code that can be exchanged for tokens including fb_user_id (and never the token name)", async () => {
     oauthProvider.configure({
-      resolvePendingAuth: () => ({
-        fbUserId: "fb-1234",
-        metaTokenName: "personal",
-      }),
+      resolvePendingAuth: () => ({ fbUserId: "fb-1234" }),
     });
 
     const res = fakeRes();
@@ -78,8 +75,8 @@ describe("MetaAdsOAuthProvider", () => {
       "fb-1234",
     );
     expect(
-      (authInfo.extra as { metaTokenName?: string } | undefined)?.metaTokenName,
-    ).toBe("personal");
+      (authInfo.extra as Record<string, unknown> | undefined)?.metaTokenName,
+    ).toBeUndefined();
   });
 
   it("rejects auth code that was issued to a different client", async () => {
@@ -108,12 +105,9 @@ describe("MetaAdsOAuthProvider", () => {
     ).rejects.toThrow(/different client/);
   });
 
-  it("preserves fb_user_id across refresh-token exchange", async () => {
+  it("preserves fb_user_id across refresh-token exchange (token name is never in the JWT)", async () => {
     oauthProvider.configure({
-      resolvePendingAuth: () => ({
-        fbUserId: "fb-9999",
-        metaTokenName: "byads",
-      }),
+      resolvePendingAuth: () => ({ fbUserId: "fb-9999" }),
     });
     const res = fakeRes();
     await oauthProvider.authorize(
@@ -143,7 +137,7 @@ describe("MetaAdsOAuthProvider", () => {
       "fb-9999",
     );
     expect(
-      (authInfo.extra as { metaTokenName?: string } | undefined)?.metaTokenName,
-    ).toBe("byads");
+      (authInfo.extra as Record<string, unknown> | undefined)?.metaTokenName,
+    ).toBeUndefined();
   });
 });

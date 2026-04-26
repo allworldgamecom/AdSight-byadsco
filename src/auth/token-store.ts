@@ -5,7 +5,6 @@ import { tokenManager } from "./token-manager.js";
 export interface RequestContext {
   accessToken: string;
   fbUserId?: string;
-  metaTokenName?: string;
 }
 
 /**
@@ -49,10 +48,6 @@ export function getAccessToken(): string {
 
 export function getCurrentFbUserId(): string | undefined {
   return requestContext.getStore()?.fbUserId;
-}
-
-export function getCurrentTokenName(): string | undefined {
-  return requestContext.getStore()?.metaTokenName;
 }
 
 /**
