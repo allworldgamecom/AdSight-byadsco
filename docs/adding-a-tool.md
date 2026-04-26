@@ -39,12 +39,13 @@ The whole shared pipeline lives in [src/meta/client.ts](../src/meta/client.ts). 
 
 ## Canonical example, line by line
 
-The smallest tool in the codebase is [src/tools/budget.ts](../src/tools/budget.ts). It's a complete, production tool in 42 lines:
+The smallest tool in the codebase is [src/tools/budget.ts](../src/tools/budget.ts). The shape below is what a new tool should look like — note the explicit `validateMetaId(...)` call before the `campaign_id` is interpolated into the Graph path. The live `budget.ts` predates that helper and inherits the gap; new tools should always validate non-account IDs at the boundary (the helper rejects anything that isn't a numeric string ≤ 30 chars, so a crafted `"123/insights"` can never be smuggled into the path).
 
 ```ts
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
+import { validateMetaId } from "../utils/format.js";
 
 export function registerBudgetTools(server: McpServer): void {
   server.tool(
@@ -58,14 +59,15 @@ export function registerBudgetTools(server: McpServer): void {
       time_end: z.string().describe("ISO 8601 end time for the budget increase"),
     },
     async ({ campaign_id, budget_value, budget_value_type, time_start, time_end }) => {
+      const id = validateMetaId(campaign_id, "campaign");
       const result = await metaApiClient.postForm<{ id: string }>(
-        `/${campaign_id}/budget_schedules`,
+        `/${id}/budget_schedules`,
         { budget_value, budget_value_type, time_start, time_end },
       );
       return {
         content: [{
           type: "text",
-          text: `Budget schedule created!\nID: ${result.id}\nCampaign: ${campaign_id}\nValue: ${budget_value} (${budget_value_type})\nPeriod: ${time_start} → ${time_end}`,
+          text: `Budget schedule created!\nID: ${result.id}\nCampaign: ${id}\nValue: ${budget_value} (${budget_value_type})\nPeriod: ${time_start} → ${time_end}`,
         }],
       };
     },
@@ -76,7 +78,8 @@ export function registerBudgetTools(server: McpServer): void {
 What each part does:
 
 - **`server.tool(name, description, schema, handler)`** — the MCP SDK uses the Zod schema both to validate inputs at runtime and to expose a JSON Schema to clients during the MCP `tools/list` handshake. The description is what the AI sees when deciding whether to call this tool — keep it specific and outcome-oriented.
-- **`metaApiClient.postForm(...)`** — issues `POST /v25.0/<campaign_id>/budget_schedules` with `application/x-www-form-urlencoded` body. Behind the scenes the client looks up the per-request access token, checks the circuit-breaker, throttles writes, retries transient failures, and converts any Meta error into a typed `McpError`.
+- **`validateMetaId(campaign_id, "campaign")`** — defence-in-depth on top of the Zod `z.string()`. The helper enforces `^\d{1,30}$` and throws otherwise, so a malformed id can't add path segments, query strings, or whitespace to the URL. Every tool that interpolates a non-account resource id (campaign / adset / ad / creative / page / business…) into a Graph path must call this at the start of the handler.
+- **`metaApiClient.postForm(...)`** — issues `POST /v25.0/<id>/budget_schedules` with `application/x-www-form-urlencoded` body. Behind the scenes the client looks up the per-request access token, checks the circuit-breaker, throttles writes, retries transient failures, and converts any Meta error into a typed `McpError`.
 - **Return shape** — every handler must return `{ content: [{ type: "text", text: "..." }, ...] }`. Adding a second `text` block with the raw JSON (`JSON.stringify(obj, null, 2)`) is a common pattern for read tools — see [src/tools/campaigns.ts:84-89](../src/tools/campaigns.ts).
 
 ## Templates
@@ -126,7 +129,7 @@ export function registerMyResourceTools(server: McpServer): void {
 }
 ```
 
-### POST / write tool
+### POST / write tool (account-scoped)
 
 ```ts
 server.tool(
@@ -146,6 +149,33 @@ server.tool(
     return {
       content: [{ type: "text", text: `Created ${result.id} (${name}, ${status}).` }],
     };
+  },
+);
+```
+
+### Update / delete on a non-account resource
+
+When the path is `/<resource_id>/...` (campaign, adset, ad, creative, page, business, etc.) instead of `/act_<account>/...`, validate the id with `validateMetaId` before interpolation. Without it, the `z.string()` schema accepts payloads like `"123/insights"` and `metaApiClient` will dutifully send a `POST` to `/v25.0/123/insights/...`, hitting an unintended endpoint with the caller's token.
+
+```ts
+import { validateMetaId } from "../utils/format.js";
+
+server.tool(
+  "meta_ads_update_my_resource",
+  "TODO: describe the update.",
+  {
+    campaign_id: z.string(),
+    name: z.string().optional(),
+    status: z.enum(["ACTIVE", "PAUSED"]).optional(),
+  },
+  async ({ campaign_id, name, status }) => {
+    const id = validateMetaId(campaign_id, "campaign");
+    const body: Record<string, string | number | boolean> = {};
+    if (name !== undefined) body.name = name;
+    if (status !== undefined) body.status = status;
+
+    await metaApiClient.postForm<{ success: boolean }>(`/${id}`, body);
+    return { content: [{ type: "text", text: `Campaign ${id} updated.` }] };
   },
 );
 ```
