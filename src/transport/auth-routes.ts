@@ -1,4 +1,5 @@
 import express from "express";
+import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 import {
   buildAuthorizeUrl,
   exchangeCodeForToken,
@@ -25,6 +26,7 @@ import {
 } from "../store/meta-token-repo.js";
 import { logger } from "../utils/logger.js";
 import { hashPii } from "../auth/token-store.js";
+import { validateAuthorizeQuery } from "./authorize-validation.js";
 
 const OAUTH_STATE_COOKIE_NAME =
   process.env.NODE_ENV === "production" ? "__Host-meta_oauth_state" : "meta_oauth_state";
@@ -124,6 +126,32 @@ function clearOAuthStateCookie(res: express.Response): void {
 
 export interface AuthRoutesOptions {
   serverUrl: URL;
+  getClient: (
+    clientId: string,
+  ) => OAuthClientInformationFull | undefined | Promise<OAuthClientInformationFull | undefined>;
+}
+
+export async function validateMetaAuthReturn(
+  input: unknown,
+  getClient: AuthRoutesOptions["getClient"],
+): Promise<string | null> {
+  if (typeof input !== "string") return null;
+  const returnTo = safeReturnTo(input);
+  if (returnTo !== input) return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(returnTo, "http://mcp.local");
+  } catch {
+    return null;
+  }
+  if (parsed.pathname !== "/authorize") return null;
+
+  const query = Object.fromEntries(parsed.searchParams.entries());
+  const validation = await validateAuthorizeQuery(query, async (clientId) =>
+    getClient(clientId),
+  );
+  return validation.ok ? returnTo : null;
 }
 
 function getMetaConfigOr500(
@@ -142,15 +170,18 @@ export function mountAuthRoutes(
   app: express.Application,
   options: AuthRoutesOptions,
 ): void {
-  const { serverUrl } = options;
+  const { serverUrl, getClient } = options;
 
   app.get("/auth/meta", async (req, res) => {
+    const returnTo = await validateMetaAuthReturn(req.query.return, getClient);
+    if (!returnTo) {
+      renderError(res, 400, "Invalid OAuth request.");
+      return;
+    }
+
     const config = getMetaConfigOr500(serverUrl, res);
     if (!config) return;
 
-    const returnTo = safeReturnTo(
-      typeof req.query.return === "string" ? req.query.return : req.originalUrl,
-    );
     const nonce = generateOAuthStateNonce();
     const state = await signOAuthState({ returnTo, nonce });
     setOAuthStateCookie(res, nonce);

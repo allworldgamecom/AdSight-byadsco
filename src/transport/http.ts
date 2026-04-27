@@ -101,6 +101,10 @@ export function getServerUrl(): URL {
   return new URL(`http://localhost:${port}`);
 }
 
+export function healthPayload(): { status: "ok" } {
+  return { status: "ok" };
+}
+
 interface ConsentContext {
   query: Record<string, string>;
   user: { fbUserId: string; email: string | null; name: string | null };
@@ -504,11 +508,14 @@ export async function startHttpTransport(
   }
 
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", server: "meta-ads-mcp", version: "1.0.0" });
+    res.json(healthPayload());
   });
 
   if (config.multiTenantEnabled) {
-    mountAuthRoutes(app, { serverUrl });
+    mountAuthRoutes(app, {
+      serverUrl,
+      getClient: (id) => oauthProvider.clientsStore.getClient(id),
+    });
 
     app.get("/authorize", async (req, res) => {
       const query = req.query as Record<string, string>;
@@ -522,25 +529,15 @@ export async function startHttpTransport(
       );
       if (!validation.ok) {
         if (validation.kind === "no-params") {
-          // Internal redirect (logout, expired-session, no-token messages).
-          // Render a friendly landing page so users can recover.
-          const session = await getSession(req);
-          const sessionLine = session
-            ? `<p>You're signed in as <code>${escapeHtml(session.email ?? session.name ?? session.fbUserId)}</code>.</p>`
-            : `<p><a href="/auth/meta">Sign in with Meta</a> to start a session.</p>`;
-          res.status(200).type("html").send(
-            `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Meta Ads MCP</title>
+          res.status(validation.status).type("html").send(
+            `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invalid request</title>
             <style>body{background:#0f0f0f;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:1rem}
             .card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:2rem;max-width:480px;text-align:center}
             h1{color:#fff;margin:0 0 1rem;font-size:1.3rem}
-            p{color:#aaa;margin:0.5rem 0;font-size:0.95rem;line-height:1.5}
-            a{color:#6cb4ee;text-decoration:none}a:hover{text-decoration:underline}
-            code{background:#222;padding:0.1rem 0.4rem;border-radius:4px;color:#ccc;font-size:0.85rem}</style></head>
+            p{color:#aaa;margin:0.5rem 0;font-size:0.95rem;line-height:1.5}</style></head>
             <body><div class="card">
-              <h1>Meta Ads MCP</h1>
-              <p>This is the OAuth authorization endpoint for the Meta Ads MCP server.</p>
-              <p>To authorize an MCP client, point it at this server's MCP URL — the client will land on this endpoint with the right query parameters.</p>
-              ${sessionLine}
+              <h1>Invalid request</h1>
+              <p>${escapeHtml(validation.message)}</p>
             </div></body></html>`,
           );
           return;

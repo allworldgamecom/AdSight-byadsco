@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getServerUrl } from "../../src/transport/http.js";
+import { getServerUrl, healthPayload } from "../../src/transport/http.js";
 
 const KEYS = ["NODE_ENV", "SERVER_URL", "PORT"] as const;
 const originalEnv: Record<(typeof KEYS)[number], string | undefined> =
@@ -57,5 +57,11 @@ describe("getServerUrl", () => {
 
     process.env.SERVER_URL = "https://10.0.0.2";
     expect(() => getServerUrl()).toThrow(/private IP/);
+  });
+});
+
+describe("healthPayload", () => {
+  it("does not expose server name or version", () => {
+    expect(healthPayload()).toEqual({ status: "ok" });
   });
 });

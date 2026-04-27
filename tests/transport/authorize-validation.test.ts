@@ -32,9 +32,14 @@ describe("validateAuthorizeQuery", () => {
     }
   });
 
-  it("returns no-params landing signal when both client_id and redirect_uri are missing (logout/expired-session recovery)", async () => {
+  it("rejects when both client_id and redirect_uri are missing", async () => {
     const r = await validateAuthorizeQuery({}, makeGetClient({}));
-    expect(r).toEqual({ ok: false, kind: "no-params", status: 200 });
+    expect(r).toEqual({
+      ok: false,
+      kind: "no-params",
+      status: 400,
+      message: "OAuth authorization parameters are required.",
+    });
   });
 
   it("rejects with missing-field when only client_id is missing", async () => {
