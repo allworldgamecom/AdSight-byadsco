@@ -13,7 +13,7 @@ import { requestContext } from "../auth/token-store.js";
 import { tokenManager } from "../auth/token-manager.js";
 import { configureSessionJtiStore, getSession } from "../auth/session.js";
 import { resolveSecurityConfig } from "./security-config.js";
-import { mountAuthRoutes } from "./auth-routes.js";
+import { mountAuthRoutes, safeReturnTo } from "./auth-routes.js";
 import { validateAuthorizeQuery } from "./authorize-validation.js";
 import {
   FirestoreClientsStore,
@@ -588,9 +588,12 @@ export async function startHttpTransport(
       async (req, res, next) => {
         const session = await getSession(req);
         if (!session) {
-          res.status(401).type("html").send(
-            "<p>Sesión expirada. <a href=\"/authorize\">Inicia de nuevo</a>.</p>",
-          );
+          const recoverTo = safeReturnTo(req.body?.return);
+          const link =
+            recoverTo === "/authorize"
+              ? "Vuelve a iniciar la autorización desde tu cliente MCP."
+              : `<a href="${escapeHtml(recoverTo)}">Inicia de nuevo</a>.`;
+          res.status(401).type("html").send(`<p>Sesión expirada. ${link}</p>`);
           return;
         }
 
@@ -607,8 +610,13 @@ export async function startHttpTransport(
         }
 
         if (!activeName) {
+          const recoverTo = safeReturnTo(req.body?.return);
+          const link =
+            recoverTo === "/authorize"
+              ? "Vuelve a iniciar la autorización desde tu cliente MCP."
+              : `Vuelve a <a href="${escapeHtml(recoverTo)}">/authorize</a>.`;
           res.status(400).type("html").send(
-            "<p>No hay token de Meta conectado. Vuelve a <a href=\"/authorize\">/authorize</a>.</p>",
+            `<p>No hay token de Meta conectado. ${link}</p>`,
           );
           return;
         }

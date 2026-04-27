@@ -290,7 +290,21 @@ export function mountAuthRoutes(
 
   app.post("/auth/logout", async (req, res) => {
     await clearSession(req, res);
-    res.redirect(302, "/authorize");
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
+    );
+    res.status(200).type("html").send(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sesión cerrada</title>
+      <style>body{background:#0f0f0f;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:1rem}
+      .card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:2rem;max-width:480px;text-align:center}
+      h1{color:#fff;margin:0 0 1rem;font-size:1.3rem}
+      p{color:#aaa;margin:0.5rem 0;font-size:0.95rem;line-height:1.5}</style></head>
+      <body><div class="card">
+        <h1>Sesión cerrada</h1>
+        <p>Tu sesión se cerró correctamente. Puedes cerrar esta pestaña y volver a iniciar la autorización desde tu cliente MCP.</p>
+      </div></body></html>`,
+    );
   });
 
   app.post(
