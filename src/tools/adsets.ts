@@ -824,18 +824,18 @@ export function registerAdSetTools(server: McpServer): void {
   // ─── Update Ad Set ───────────────────────────────────────────
   server.tool(
     "meta_ads_update_adset",
-    "Update an existing ad set's name, status, budget, targeting, destination_type, or bid settings.",
+    "Update an existing ad set in place. Common use cases: change daily_budget or lifetime_budget (values in cents — e.g., 2000 = $20.00), pause/reactivate via status (ACTIVE/PAUSED), extend end_time, replace targeting, adjust bid_amount/bid_strategy, or rename. Only the fields you pass are sent to Meta — omitted fields keep their current value. lifetime_budget requires a corresponding end_time on the ad set. Authentication is handled transparently: the active Meta token is resolved from the request context (Sign in with Meta OAuth, registered System User token, or X-Meta-Token header in service-to-service mode). Note that meaningful changes to bid_amount, bid_strategy, or targeting can re-trigger Meta's learning phase.",
     {
       adset_id: z.string().describe("Ad set ID to update"),
-      name: z.string().optional(),
-      status: statusEnum.optional(),
-      destination_type: destinationTypeEnum.optional().describe("Where the ad traffic is directed (e.g., WEBSITE, APP, MESSENGER, ON_AD)"),
-      daily_budget: z.number().optional().describe("Daily budget in cents"),
-      lifetime_budget: z.number().optional(),
-      targeting: targetingSchema.optional(),
-      bid_amount: z.number().optional().describe("Bid cap in cents"),
-      bid_strategy: bidStrategyEnum.optional(),
-      end_time: z.string().optional(),
+      name: z.string().optional().describe("New ad set name"),
+      status: statusEnum.optional().describe("New status. Use ACTIVE to start delivery, PAUSED to stop, ARCHIVED to retire. Use meta_ads_delete_adset for soft-deletion."),
+      destination_type: destinationTypeEnum.optional().describe("Where the ad traffic is directed. Common values: WEBSITE (website traffic/conversions), APP (app installs), MESSENGER (Messenger conversations), WHATSAPP (WhatsApp conversations), INSTAGRAM_DIRECT (Instagram DMs), ON_AD (lead forms, instant experiences, post engagement), ON_VIDEO (video views), ON_PAGE (page engagement), SHOP_AUTOMATIC (shop)"),
+      daily_budget: z.number().optional().describe("Daily budget in cents (e.g., 2000 = $20.00). Mutually exclusive with lifetime_budget."),
+      lifetime_budget: z.number().optional().describe("Lifetime budget in cents. Requires the ad set to have an end_time set; pass end_time in the same call if it isn't already configured."),
+      targeting: targetingSchema.optional().describe("Replacement targeting spec. Replaces the entire targeting object — pass the full spec, not a partial one."),
+      bid_amount: z.number().optional().describe("Bid cap in cents. Only meaningful with bid_strategy = LOWEST_COST_WITH_BID_CAP or COST_CAP."),
+      bid_strategy: bidStrategyEnum.optional().describe("Bidding strategy. Changing strategy may require corresponding changes to bid_amount."),
+      end_time: z.string().optional().describe("ISO 8601 end time. Required when setting or keeping lifetime_budget."),
     },
     async ({ adset_id, name, status, destination_type, daily_budget, lifetime_budget, targeting, bid_amount, bid_strategy, end_time }) => {
       const id = validateMetaId(adset_id, "adset");

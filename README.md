@@ -20,6 +20,7 @@
 - [Setting up Sign in with Meta](#setting-up-sign-in-with-meta)
 - [Registering System User tokens (no expiry)](#registering-system-user-tokens-no-expiry)
 - [Connecting AI clients](#connecting-ai-clients)
+- [Common workflows](#common-workflows)
 - [Architecture overview](#architecture-overview)
 - [Meta API compliance](#meta-api-compliance)
 - [Deployment](#deployment)
@@ -235,6 +236,42 @@ Content-Type: application/json
 ### Other MCP clients
 
 Any client that speaks the [Model Context Protocol](https://modelcontextprotocol.io) over Streamable HTTP works — Cline, Continue, Cursor, custom Anthropic SDK or OpenAI SDK integrations, etc. Point them at `https://<SERVER_URL>/mcp`.
+
+## Common workflows
+
+### Updating an ad set's budget
+
+Adjusting the budget of a live ad set is a high-frequency operation for agencies — daily caps need to scale up and down based on pacing, while keeping the rest of the targeting and creative untouched. Use `meta_ads_update_adset` and only pass the fields you want to change; everything else stays as-is on Meta's side. Budget values are sent **in cents**, matching the Meta Marketing API convention (`2000` = `$20.00`). Authentication is transparent: whichever mode the deployment uses (Sign in with Meta OAuth, registered System User token, or `MCP_API_KEY` + `X-Meta-Token` headers), the active token is resolved per request and applied automatically.
+
+The `tools/call` payload an MCP client sends:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "meta_ads_update_adset",
+    "arguments": {
+      "adset_id": "120200000000000000",
+      "daily_budget": 5000
+    }
+  }
+}
+```
+
+Expected response (the handler returns one MCP `text` block):
+
+```text
+Ad set 120200000000000000 updated successfully.
+Changes: {"daily_budget":"5000"}
+```
+
+Notes:
+
+- To switch to a `lifetime_budget`, pass `lifetime_budget` together with `end_time` (ISO 8601). Meta rejects a `lifetime_budget` on an ad set with no `end_time`.
+- Changing `bid_amount`, `bid_strategy`, or replacing `targeting` can re-trigger Meta's learning phase.
+- Under the hood the tool issues `POST /v25.0/<adset_id>` against the Meta Graph API, routed through the shared client (rate-limit, write-pacer, circuit-breaker, error classifier). See [src/tools/adsets.ts](src/tools/adsets.ts) for the full schema.
 
 ## Architecture overview
 
