@@ -188,6 +188,8 @@ The repo is public but the deployment is private: nothing sensitive lives in the
 
 5. **Connect Claude**: point Claude (Desktop or Web) to `https://<SERVER_URL>/mcp`. On the first tool call Claude will open the `/authorize` page in your browser, kick off Facebook Login, and you'll land on a consent screen with your token already provisioned. Approve once and Claude is connected.
 
+For the full end-to-end flow with sequence diagram, cURL examples for `/.well-known`, `/register`, `/authorize`, `/token`, multi-tenant token resolution via `AsyncLocalStorage`, troubleshooting and verification steps, see [docs/oauth-multi-tenant.md](docs/oauth-multi-tenant.md).
+
 ## Registering System User tokens (no expiry)
 
 Long-lived user tokens last 60 days and are auto-refreshed. If you prefer a token that does not expire (typical for agency System Users), open the `/authorize` consent page and use **"Registrar System User token"** — paste the System User access token, it is validated against Graph API `/me`, encrypted, and saved alongside your personal token. Switch the active token from the same UI.
@@ -273,6 +275,85 @@ Notes:
 - Changing `bid_amount`, `bid_strategy`, or replacing `targeting` can re-trigger Meta's learning phase.
 - Under the hood the tool issues `POST /v25.0/<adset_id>` against the Meta Graph API, routed through the shared client (rate-limit, write-pacer, circuit-breaker, error classifier). See [src/tools/adsets.ts](src/tools/adsets.ts) for the full schema.
 
+### Working with custom audiences
+
+A typical agency workflow: build a CRM-derived seed audience, expand it into a lookalike, attach the lookalike to one or more ad sets, and check the addressable size before launching. The relevant tools split across two modules:
+
+| Tool | Source | Purpose |
+|---|---|---|
+| `meta_ads_get_custom_audiences` | [src/tools/audiences.ts](src/tools/audiences.ts) | List audiences (custom, website, lookalikes…) on an ad account. |
+| `meta_ads_get_audience_details` | [src/tools/audiences.ts](src/tools/audiences.ts) | Inspect one audience: subtype, retention, size estimate. |
+| `meta_ads_create_custom_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Create CUSTOM / WEBSITE / APP / OFFLINE_CONVERSION / ENGAGEMENT subtypes. |
+| `meta_ads_create_lookalike_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Build a lookalike (1 %–20 %) from a seed audience + country. |
+| `meta_ads_delete_custom_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Permanent delete; cannot be undone. |
+| `meta_ads_estimate_audience_size` | [src/tools/targeting.ts](src/tools/targeting.ts) | Get reach estimate before pushing the audience to an ad set. |
+| `meta_ads_update_adset` | [src/tools/adsets.ts](src/tools/adsets.ts) | **Apply** the audience by writing to `targeting.custom_audiences`. |
+
+The MCP `tools/call` payload for an end-to-end run:
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+  "params": { "name": "meta_ads_create_custom_audience",
+    "arguments": {
+      "account_id": "act_1234567890",
+      "name": "FTDs last 90d",
+      "subtype": "CUSTOM",
+      "customer_file_source": "USER_PROVIDED_ONLY",
+      "retention_days": 90,
+      "description": "First-time depositors, weekly export"
+    } } }
+```
+
+Returns an audience id (e.g. `23842000000000000`). Then upload hashed PII via the customer-list endpoint (separate flow — Meta requires SHA-256 of normalized email / phone), and build the lookalike:
+
+```json
+{ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+  "params": { "name": "meta_ads_create_lookalike_audience",
+    "arguments": {
+      "account_id": "act_1234567890",
+      "name": "LAL 3% US — FTDs",
+      "origin_audience_id": "23842000000000000",
+      "ratio": 0.03,
+      "country": "US"
+    } } }
+```
+
+Lookalike ids land in seconds but Meta needs ~24 h to compute the actual users. **Apply** the lookalike to a live ad set:
+
+```json
+{ "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+  "params": { "name": "meta_ads_update_adset",
+    "arguments": {
+      "adset_id": "120200000000000000",
+      "targeting": {
+        "custom_audiences": [{ "id": "23842000000000099" }],
+        "geo_locations": { "countries": ["US"] }
+      }
+    } } }
+```
+
+Validate reach before spend:
+
+```json
+{ "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+  "params": { "name": "meta_ads_estimate_audience_size",
+    "arguments": {
+      "account_id": "act_1234567890",
+      "targeting_spec": {
+        "custom_audiences": [{ "id": "23842000000000099" }],
+        "geo_locations": { "countries": ["US"] },
+        "age_min": 25, "age_max": 55
+      }
+    } } }
+```
+
+Notes:
+
+- **PII must be hashed** (SHA-256 of trimmed lower-case value) before uploading to a `CUSTOM` audience with `customer_file_source=USER_PROVIDED_ONLY`. Plaintext uploads are rejected by Meta.
+- **Lookalike source minimum** is ~100 people in the seed; below that, Meta returns a "too small to model" error and `subtype=LOOKALIKE` creation fails.
+- **Removing an audience from an ad set** isn't done by deleting the audience (which kills it everywhere). Call `meta_ads_update_adset` with `targeting.custom_audiences = []` (or omit and pass a different combination).
+- All audience reads/writes go through the same shared `metaApiClient` ([src/meta/client.ts](src/meta/client.ts)) — bucketed rate-limits, circuit-breaker, write-pacer, and per-request token resolution apply automatically.
+
 ## Architecture overview
 
 - **Transport** — Express 5 with the official MCP SDK's `StreamableHTTPServerTransport`. Stateless: each request gets its own transport + server pair. See [src/transport/http.ts](src/transport/http.ts).
@@ -320,15 +401,63 @@ This server is designed to keep your app and your clients' ad accounts clear of 
 
 ### Observability
 
-Call `meta_ads_rate_status` at any time to see:
+Call `meta_ads_rate_status` at any time to see usage, open circuits and the write-pacer state — it returns in-process state and does not call Meta. Sample JSON output (the second `text` block of the MCP response):
 
-- Current `call_count`, `total_cputime`, `total_time` per bucket.
-- `estimated_time_to_regain_access` remaining.
-- `ads_api_access_tier` (`development_access` / `standard_access`).
-- Any open circuits — key, reason, seconds remaining.
-- Write-pacer state per ad account.
+```json
+{
+  "usage": [
+    { "kind": "app",       "key": "app:9c3f…",                 "callCount": 47, "cpuTime": 31, "totalTime": 22, "estimatedTimeToRegainAccessMs": 0,        "adsApiAccessTier": "standard_access" },
+    { "kind": "buc",       "key": "buc:9c3f…:act_1234567890",  "callCount": 71, "cpuTime": 64, "totalTime": 58, "estimatedTimeToRegainAccessMs": 0,        "adsApiAccessTier": "standard_access" },
+    { "kind": "insights",  "key": "insights:9c3f…:act_1234567890", "callCount": 18, "cpuTime": 12, "totalTime": 9, "estimatedTimeToRegainAccessMs": 0,    "adsApiAccessTier": "standard_access" },
+    { "kind": "acc",       "key": "acc:act_1234567890",        "callCount": 33, "cpuTime": 0,  "totalTime": 0,  "estimatedTimeToRegainAccessMs": 0,        "adsApiAccessTier": null },
+    { "kind": "local_retry","key": "local_retry:9c3f…:act_1234567890:CUSTOM_AUDIENCE", "callCount": 0, "cpuTime": 0, "totalTime": 0, "estimatedTimeToRegainAccessMs": 184000, "adsApiAccessTier": null }
+  ],
+  "circuits": [
+    { "key": "9c3f…:act_1234567890", "reason": "repeated_throttle", "openUntil": 1716482700000, "tripCount": 1, "lastError": "User request limit reached (4)" }
+  ],
+  "writePacer": [
+    { "key": "9c3f…:act_1234567890", "tokens": 7, "capacity": 60, "rateRps": 0.5, "tier": "standard_access" }
+  ]
+}
+```
+
+Field reference:
+
+- `kind` — `app` (per-token X-App-Usage), `buc` (X-Business-Use-Case-Usage), `insights` (x-fb-ads-insights-throttle), `acc` (x-ad-account-usage), `reach` (x-Fb-Ads-Insights-Reach-Throttle), `local_retry` (parsed from `error.error_user_msg`'s `Retry-After` hint).
+- `callCount` / `cpuTime` / `totalTime` — % of quota used (0–100).
+- `estimatedTimeToRegainAccessMs` — countdown from Meta when throttled.
+- `adsApiAccessTier` — `development_access` (no IDs allowed in some endpoints, harsher quotas) or `standard_access`.
+- `circuits[]` — open circuits blocking calls; `reason` is one of `abuse_signal`, `retry_after_hint`, `repeated_throttle`, `temporary_block`.
+- `writePacer[]` — token-bucket state for `POST`/`DELETE` Ads Management calls; `tokens` available, `capacity`, `rateRps` refill rate.
 
 Structured logs fire on every Meta error (`event=meta_error`), abuse signal (`event=META_ABUSE_SIGNAL`, `level=FATAL`), circuit change (`event=meta_circuit_open`) and periodic usage snapshot (`event=meta_rate_usage`).
+
+### Circuit-breaker thresholds
+
+Constants live in [src/meta/circuit-breaker.ts](src/meta/circuit-breaker.ts):
+
+| Trigger | Cooldown | Notes |
+|---|---|---|
+| Abuse signal — error 613, subcode `1996` | **60 min** | Meta's documented "stop calling" rule. Logged as `level=FATAL`. |
+| Temporary user/business block — codes 368, 1487742 | **30 min** | Surfaced from explicit error subcodes. |
+| Repeated throttle — ≥3 throttle events in 5 min on the same `(token, account, type)` bucket | **15 min** | Local heuristic to head off a hard ban. |
+| `retry-after` hint in error body | honored as-is | Whatever Meta returns — never overridden. |
+| Data-per-call limit (100/1487534) | none | The query is wrong, not the rate. Returned as `InvalidParams`. |
+
+### Retry policy
+
+Throttled errors are **never retried inside the same request** — Meta's docs warn that continuing to call extends `estimated_time_to_regain_access`. Only truly transient errors (codes 1, 2; HTTP 5xx; aborts) are retried, with capped exponential backoff:
+
+```ts
+// src/meta/client.ts
+private async backoff(attempt: number): Promise<void> {
+  const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);   // 1s, 2s, 4s
+  const jitter = delay * (Math.random() * 0.4 - 0.2);      // ±20 %
+  await new Promise((resolve) => setTimeout(resolve, delay + jitter));
+}
+```
+
+`MAX_RETRIES = 3`, `RETRY_BASE_DELAY = 1000ms`. After exhausting retries the original error bubbles up classified as an `McpError` with the right `ErrorCode`.
 
 ## Deployment
 
@@ -344,7 +473,85 @@ docker run --rm -p 3000:3000 --env-file .env ghcr.io/byadsco/meta-ads-mcp:latest
 docker compose up
 ```
 
-The provided [Dockerfile](Dockerfile) is a multi-stage Node 22 Alpine build that runs as a non-root `node` user, exposes port 3000 and ships with a `/health` health check.
+The provided [Dockerfile](Dockerfile) is a multi-stage Node 22 Alpine build that runs as a non-root `node` user, exposes port 3000 and ships with a `/health` health check:
+
+```dockerfile
+FROM node:22-alpine AS builder
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+
+COPY tsconfig.json ./
+COPY src/ src/
+RUN npm run build
+
+FROM node:22-alpine AS runtime
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY --from=builder /app/dist/ dist/
+COPY --from=builder /app/node_modules/ node_modules/
+COPY package.json ./
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
+USER node
+CMD ["node", "dist/index.js"]
+```
+
+For local development the repository ships a [docker-compose.yml](docker-compose.yml) that wires every supported env var. Drop a `.env` next to it and run `docker compose up`:
+
+```yaml
+services:
+  meta-ads-mcp:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - SERVER_URL=${SERVER_URL:-http://localhost:3000}
+      - META_APP_ID=${META_APP_ID:-}
+      - META_APP_SECRET=${META_APP_SECRET:-}
+      - META_OAUTH_REDIRECT_URI=${META_OAUTH_REDIRECT_URI:-}
+      - AUTH_ALLOWED_EMAILS=${AUTH_ALLOWED_EMAILS:-}
+      - AUTH_ALLOWED_DOMAINS=${AUTH_ALLOWED_DOMAINS:-}
+      - AUTH_ALLOWED_FB_USER_IDS=${AUTH_ALLOWED_FB_USER_IDS:-}
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
+      - SESSION_COOKIE_SECRET=${SESSION_COOKIE_SECRET:-}
+      - OAUTH_SECRET=${OAUTH_SECRET:-}
+      - FIRESTORE_PROJECT_ID=${FIRESTORE_PROJECT_ID:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - META_ACCESS_TOKEN=${META_ACCESS_TOKEN:-}
+      - META_TOKENS=${META_TOKENS:-}
+      - MCP_API_KEY=${MCP_API_KEY:-}
+      - META_API_VERSION=${META_API_VERSION:-v22.0}
+      - PORT=3000
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - NODE_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+```
+
+A minimum `.env` for a multi-tenant local run:
+
+```bash
+SERVER_URL=http://localhost:3000
+META_APP_ID=...
+META_APP_SECRET=...
+AUTH_ALLOWED_EMAILS=you@example.com
+TOKEN_ENCRYPTION_KEY=$(openssl rand -hex 32)
+SESSION_COOKIE_SECRET=$(openssl rand -base64 32)
+OAUTH_SECRET=$(openssl rand -hex 32)
+FIRESTORE_PROJECT_ID=my-gcp-project   # or use the emulator
+```
 
 ### Google Cloud Run (reference deploy)
 

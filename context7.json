@@ -1,4 +1,6 @@
 {
   "url": "https://context7.com/byadsco/meta-ads-mcp",
-  "public_key": "pk_HZ7MG8rJbZtgZam6cGouY"
+  "public_key": "pk_HZ7MG8rJbZtgZam6cGouY",
+  "folders": ["docs", "src/tools", "src/meta", "src/auth"],
+  "excludeFolders": ["node_modules", "dist", "tests"]
 }
