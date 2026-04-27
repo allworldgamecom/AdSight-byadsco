@@ -291,4 +291,35 @@ describe("registerAdSetTools", () => {
       expect(vi.mocked(fetch)).toHaveBeenCalledTimes(6);
     });
   });
+
+  describe("meta_ads_update_adset handler", () => {
+    it("issues POST /<adset_id> with only the budget field and confirms success", async () => {
+      const server = createMockMcpServer();
+      registerAdSetTools(server as never);
+
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse({ success: true })));
+
+      const tool = server._registeredTools.find((t) => t.name === "meta_ads_update_adset");
+      expect(tool).toBeDefined();
+
+      const result = await tool!.handler({
+        adset_id: "2001",
+        daily_budget: 5000,
+      }) as { content: Array<{ type: string; text: string }> };
+
+      const call = vi.mocked(fetch).mock.calls[0];
+      const url = new URL(call[0] as string);
+      expect(url.pathname).toMatch(/\/2001$/);
+      expect(call[1]?.method).toBe("POST");
+
+      const body = call[1]?.body as string;
+      expect(body).toContain("daily_budget=5000");
+      expect(body).not.toContain("name=");
+      expect(body).not.toContain("status=");
+      expect(body).not.toContain("targeting=");
+
+      expect(result.content[0].text).toContain("Ad set 2001 updated successfully");
+      expect(result.content[0].text).toContain("daily_budget");
+    });
+  });
 });
