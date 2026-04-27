@@ -1,4 +1,5 @@
 import express from "express";
+import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 import {
   buildAuthorizeUrl,
   exchangeCodeForToken,
@@ -25,6 +26,7 @@ import {
 } from "../store/meta-token-repo.js";
 import { logger } from "../utils/logger.js";
 import { hashPii } from "../auth/token-store.js";
+import { validateAuthorizeQuery } from "./authorize-validation.js";
 
 const OAUTH_STATE_COOKIE_NAME =
   process.env.NODE_ENV === "production" ? "__Host-meta_oauth_state" : "meta_oauth_state";
@@ -124,6 +126,32 @@ function clearOAuthStateCookie(res: express.Response): void {
 
 export interface AuthRoutesOptions {
   serverUrl: URL;
+  getClient: (
+    clientId: string,
+  ) => OAuthClientInformationFull | undefined | Promise<OAuthClientInformationFull | undefined>;
+}
+
+export async function validateMetaAuthReturn(
+  input: unknown,
+  getClient: AuthRoutesOptions["getClient"],
+): Promise<string | null> {
+  if (typeof input !== "string") return null;
+  const returnTo = safeReturnTo(input);
+  if (returnTo !== input) return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(returnTo, "http://mcp.local");
+  } catch {
+    return null;
+  }
+  if (parsed.pathname !== "/authorize") return null;
+
+  const query = Object.fromEntries(parsed.searchParams.entries());
+  const validation = await validateAuthorizeQuery(query, async (clientId) =>
+    getClient(clientId),
+  );
+  return validation.ok ? returnTo : null;
 }
 
 function getMetaConfigOr500(
@@ -142,15 +170,18 @@ export function mountAuthRoutes(
   app: express.Application,
   options: AuthRoutesOptions,
 ): void {
-  const { serverUrl } = options;
+  const { serverUrl, getClient } = options;
 
   app.get("/auth/meta", async (req, res) => {
+    const returnTo = await validateMetaAuthReturn(req.query.return, getClient);
+    if (!returnTo) {
+      renderError(res, 400, "Invalid OAuth request.");
+      return;
+    }
+
     const config = getMetaConfigOr500(serverUrl, res);
     if (!config) return;
 
-    const returnTo = safeReturnTo(
-      typeof req.query.return === "string" ? req.query.return : req.originalUrl,
-    );
     const nonce = generateOAuthStateNonce();
     const state = await signOAuthState({ returnTo, nonce });
     setOAuthStateCookie(res, nonce);
@@ -259,7 +290,21 @@ export function mountAuthRoutes(
 
   app.post("/auth/logout", async (req, res) => {
     await clearSession(req, res);
-    res.redirect(302, "/authorize");
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
+    );
+    res.status(200).type("html").send(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sesión cerrada</title>
+      <style>body{background:#0f0f0f;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:1rem}
+      .card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:2rem;max-width:480px;text-align:center}
+      h1{color:#fff;margin:0 0 1rem;font-size:1.3rem}
+      p{color:#aaa;margin:0.5rem 0;font-size:0.95rem;line-height:1.5}</style></head>
+      <body><div class="card">
+        <h1>Sesión cerrada</h1>
+        <p>Tu sesión se cerró correctamente. Puedes cerrar esta pestaña y volver a iniciar la autorización desde tu cliente MCP.</p>
+      </div></body></html>`,
+    );
   });
 
   app.post(

@@ -2,7 +2,7 @@ import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/share
 
 export type AuthorizeValidationResult =
   | { ok: true; redirectUri: string; redirectOrigin: string }
-  | { ok: false; kind: "no-params"; status: 200 }
+  | { ok: false; kind: "no-params"; status: 400; message: string }
   | {
       ok: false;
       kind: "missing-field" | "unknown-client" | "redirect-mismatch" | "malformed-redirect";
@@ -44,12 +44,15 @@ export async function validateAuthorizeQuery(
   const clientId = single(query.client_id);
   const redirectUri = single(query.redirect_uri);
 
-  // Both missing → not an OAuth attempt, just a user landing here from an
-  // internal redirect (logout, expired-session message, etc.). Return a
-  // soft "no-params" so the caller can render a landing page instead of a
-  // hostile 400.
+  // Both missing → not a valid OAuth attempt. Keep the response generic so
+  // this endpoint does not become a public product landing page.
   if (!clientId && !redirectUri) {
-    return { ok: false, kind: "no-params", status: 200 };
+    return {
+      ok: false,
+      kind: "no-params",
+      status: 400,
+      message: "OAuth authorization parameters are required.",
+    };
   }
   // One present, the other missing → a malformed OAuth request from a
   // client. This is a real validation error.
