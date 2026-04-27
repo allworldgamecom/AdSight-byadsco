@@ -10,7 +10,7 @@ export function registerAudienceTools(server: McpServer): void {
   // ─── Get Custom Audiences ─────────────────────────────────────
   server.tool(
     "meta_ads_get_custom_audiences",
-    "List custom audiences for an ad account. Includes lookalikes, website audiences, customer lists, etc.",
+    "List custom audiences for an ad account. Includes lookalikes, website audiences, customer lists, engagement audiences and offline-conversion audiences. Use the returned audience id with meta_ads_update_adset (targeting.custom_audiences=[{id}]) to apply the audience to an ad set.",
     {
       account_id: z.string().describe("Ad account ID"),
       limit: z.number().min(1).max(100).default(25),
@@ -48,7 +48,7 @@ export function registerAudienceTools(server: McpServer): void {
   // ─── Get Audience Details ─────────────────────────────────────
   server.tool(
     "meta_ads_get_audience_details",
-    "Get detailed information about a specific custom audience, including size estimates and lookalike specs.",
+    "Get detailed information about a specific custom audience, including subtype, retention period, approximate size bounds and lookalike spec. Useful before applying it to an ad set via meta_ads_update_adset.",
     {
       audience_id: z.string().describe("Custom audience ID"),
       fields: z.array(z.string()).optional(),
@@ -77,7 +77,7 @@ export function registerAudienceTools(server: McpServer): void {
   // ─── Create Custom Audience ───────────────────────────────────
   server.tool(
     "meta_ads_create_custom_audience",
-    "Create a new custom audience (customer list type). Use this to create audiences from CRM data like FTDs, depositors, etc.",
+    "Create a new custom audience on an ad account (CUSTOM customer-list, WEBSITE pixel-based, APP, OFFLINE_CONVERSION or ENGAGEMENT). For CUSTOM/customer-list audiences, PII (email, phone) must be SHA-256 hashed before upload. After creation: (1) optionally feed users via the customer-list endpoint, (2) build a lookalike with meta_ads_create_lookalike_audience, and (3) apply the audience id to an ad set with meta_ads_update_adset (targeting.custom_audiences=[{id}]).",
     {
       account_id: z.string().describe("Ad account ID"),
       name: z.string().min(1).describe("Audience name"),
@@ -131,7 +131,7 @@ export function registerAudienceTools(server: McpServer): void {
   // ─── Create Lookalike Audience ────────────────────────────────
   server.tool(
     "meta_ads_create_lookalike_audience",
-    "Create a lookalike audience based on an existing source audience. Specify ratio (1%-20%) to control size vs. similarity tradeoff.",
+    "Create a lookalike audience seeded by an existing custom audience. Source must have ~100+ matched users or Meta rejects the request. Ratio controls similarity vs. reach (0.01 = closest 1%, 0.20 = top 20% — bigger reach, lower similarity). After creation, apply the lookalike id to an ad set with meta_ads_update_adset (targeting.custom_audiences=[{id}]). Lookalikes typically need ~24 h to compute users — id is returned immediately but reach starts at zero.",
     {
       account_id: z.string().describe("Ad account ID"),
       name: z.string().min(1).describe("Lookalike audience name"),
@@ -176,7 +176,7 @@ export function registerAudienceTools(server: McpServer): void {
   // ─── Delete Custom Audience ───────────────────────────────────
   server.tool(
     "meta_ads_delete_custom_audience",
-    "Delete a custom audience. This action cannot be undone.",
+    "Permanently delete a custom audience from the ad account. Cannot be undone. To remove an audience from a single ad set without destroying it everywhere, prefer meta_ads_update_adset with targeting.custom_audiences set to a different array (or omitted from a fresh targeting spec).",
     {
       audience_id: z.string().describe("Custom audience ID to delete"),
     },
