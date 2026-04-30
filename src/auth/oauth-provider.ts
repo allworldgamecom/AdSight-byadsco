@@ -12,6 +12,10 @@ import type {
   OAuthTokens,
   OAuthTokenRevocationRequest,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
+import {
+  InvalidGrantError,
+  InvalidTokenError,
+} from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { logger } from "../utils/logger.js";
 import {
   InMemoryAuthCodesStore,
@@ -115,14 +119,16 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
   ): Promise<string> {
     const entry = await this.authCodesImpl.get(authorizationCode);
     if (!entry) {
-      throw new Error("Invalid authorization code");
+      throw new InvalidGrantError("Invalid authorization code");
     }
     if (entry.clientId !== client.client_id) {
-      throw new Error("Authorization code was issued to a different client");
+      throw new InvalidGrantError(
+        "Authorization code was issued to a different client",
+      );
     }
     if (entry.expiresAt < Math.floor(Date.now() / 1000)) {
       await this.authCodesImpl.delete(authorizationCode);
-      throw new Error("Authorization code has expired");
+      throw new InvalidGrantError("Authorization code has expired");
     }
     return entry.codeChallenge;
   }
@@ -138,14 +144,16 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
     // first caller sees the entry. RFC 6749 §10.5: codes must be single-use.
     const entry = await this.authCodesImpl.consume(authorizationCode);
     if (!entry) {
-      throw new Error("Invalid authorization code");
+      throw new InvalidGrantError("Invalid authorization code");
     }
 
     if (entry.clientId !== client.client_id) {
-      throw new Error("Authorization code was issued to a different client");
+      throw new InvalidGrantError(
+        "Authorization code was issued to a different client",
+      );
     }
     if (entry.expiresAt < Math.floor(Date.now() / 1000)) {
-      throw new Error("Authorization code has expired");
+      throw new InvalidGrantError("Authorization code has expired");
     }
 
     // Defense-in-depth PKCE check. mcp-sdk's primary verification happens
@@ -161,7 +169,7 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
         .update(codeVerifier)
         .digest("base64url");
       if (computed !== entry.codeChallenge) {
-        throw new Error("PKCE verification failed");
+        throw new InvalidGrantError("PKCE verification failed");
       }
     }
 
@@ -185,14 +193,16 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
       algorithms: ["HS256"],
       audience: REFRESH_AUDIENCE,
     }).catch(() => {
-      throw new Error("Invalid refresh token");
+      throw new InvalidGrantError("Invalid refresh token");
     });
 
     if (payload.type !== "refresh") {
-      throw new Error("Token is not a refresh token");
+      throw new InvalidGrantError("Token is not a refresh token");
     }
     if (payload.sub !== client.client_id) {
-      throw new Error("Refresh token was issued to a different client");
+      throw new InvalidGrantError(
+        "Refresh token was issued to a different client",
+      );
     }
     // jti must be present in the allow-list — i.e. issued by us, not yet
     // revoked, and not yet rotated. Old tokens issued before this code
@@ -200,7 +210,7 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
     // intended behaviour after rolling out the change.
     const jti = typeof payload.jti === "string" ? payload.jti : null;
     if (!jti) {
-      throw new Error("Refresh token missing jti");
+      throw new InvalidGrantError("Refresh token missing jti");
     }
     // Atomic consume: under concurrent refresh requests with the same
     // token, only one wins. Without this, has()+delete() were two
@@ -209,7 +219,9 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
     // sufficient async interleaving). Even if generateTokens fails after
     // this, the worst case is the user has to re-authorize.
     if (!(await this.refreshJtiStoreImpl.consume(jti))) {
-      throw new Error("Refresh token has been revoked or already used");
+      throw new InvalidGrantError(
+        "Refresh token has been revoked or already used",
+      );
     }
 
     return this.generateTokens({
@@ -223,15 +235,20 @@ export class MetaAdsOAuthProvider implements OAuthServerProvider {
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     const secret = getJwtSecret();
 
+    // Throw the SDK's typed error so requireBearerAuth responds with
+    // 401 + WWW-Authenticate (triggering the client's refresh flow).
+    // A plain Error here falls through to the SDK's generic 500 path,
+    // which leaves clients stuck pretending the server is down once
+    // their 1h access token expires.
     const { payload } = await jwtVerify(token, secret, {
       algorithms: ["HS256"],
       audience: ACCESS_AUDIENCE,
     }).catch(() => {
-      throw new Error("Invalid access token");
+      throw new InvalidTokenError("Invalid access token");
     });
 
     if (payload.type !== "access") {
-      throw new Error("Token is not an access token");
+      throw new InvalidTokenError("Token is not an access token");
     }
 
     const extra: Record<string, unknown> = {};

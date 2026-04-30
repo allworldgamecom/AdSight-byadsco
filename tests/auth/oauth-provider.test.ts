@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Response } from "express";
+import { SignJWT } from "jose";
 import {
   oauthProvider,
   resetOAuthProviderForTests,
 } from "../../src/auth/oauth-provider.js";
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
+import {
+  InvalidGrantError,
+  InvalidTokenError,
+} from "@modelcontextprotocol/sdk/server/auth/errors.js";
 
 const original = process.env.OAUTH_SECRET;
 
@@ -349,6 +354,59 @@ describe("MetaAdsOAuthProvider", () => {
     await expect(
       oauthProvider.verifyAccessToken(tokens.refresh_token!),
     ).rejects.toThrow(/Invalid access token/);
+  });
+
+  it("verifyAccessToken rejects malformed tokens with InvalidTokenError (SDK maps to 401)", async () => {
+    await expect(
+      oauthProvider.verifyAccessToken("not-a-jwt"),
+    ).rejects.toBeInstanceOf(InvalidTokenError);
+  });
+
+  it("verifyAccessToken rejects expired tokens with InvalidTokenError (SDK maps to 401)", async () => {
+    const secret = new TextEncoder().encode("x".repeat(64));
+    const expired = await new SignJWT({
+      sub: "test-client",
+      type: "access",
+    })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt(0)
+      .setExpirationTime(1)
+      .setAudience("mcp-oauth-access")
+      .sign(secret);
+
+    await expect(oauthProvider.verifyAccessToken(expired)).rejects.toBeInstanceOf(
+      InvalidTokenError,
+    );
+  });
+
+  it("verifyAccessToken rejects wrong-audience tokens with InvalidTokenError", async () => {
+    const secret = new TextEncoder().encode("x".repeat(64));
+    const now = Math.floor(Date.now() / 1000);
+    const wrongAudience = await new SignJWT({
+      sub: "test-client",
+      type: "access",
+    })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt(now)
+      .setExpirationTime(now + 60)
+      .setAudience("some-other-audience")
+      .sign(secret);
+
+    await expect(
+      oauthProvider.verifyAccessToken(wrongAudience),
+    ).rejects.toBeInstanceOf(InvalidTokenError);
+  });
+
+  it("exchangeRefreshToken rejects invalid tokens with InvalidGrantError", async () => {
+    await expect(
+      oauthProvider.exchangeRefreshToken(fakeClient, "not-a-jwt"),
+    ).rejects.toBeInstanceOf(InvalidGrantError);
+  });
+
+  it("exchangeAuthorizationCode rejects unknown codes with InvalidGrantError", async () => {
+    await expect(
+      oauthProvider.exchangeAuthorizationCode(fakeClient, "does-not-exist"),
+    ).rejects.toBeInstanceOf(InvalidGrantError);
   });
 
   it("preserves fb_user_id across refresh-token exchange (token name is never in the JWT)", async () => {
