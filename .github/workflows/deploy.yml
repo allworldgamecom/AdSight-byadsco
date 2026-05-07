@@ -366,3 +366,99 @@ jobs:
             echo "OAuth metadata check FAILED (HTTP ${OAUTH_STATUS})"
             exit 1
           fi
+
+  release:
+    # Auto-publish a GitHub Release when package.json version is bumped on main.
+    # Idempotent: skips silently if a release for the current version already
+    # exists, so non-version-bumping pushes are no-ops.
+    #
+    # Note: this job only CREATES the release. It does not trigger publish.yml
+    # by itself, because GitHub blocks recursive workflow triggers from
+    # GITHUB_TOKEN-created releases. The follow-up `publish` job below calls
+    # publish.yml explicitly via workflow_call, which is permitted.
+    name: Auto-publish GitHub Release
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      created: ${{ steps.create.outputs.created }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Checkout deployed SHA
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          ref: ${{ github.sha }}    # match the commit the deploy job validated
+          fetch-depth: 0            # full history needed for --generate-notes
+
+      - name: Read package.json version
+        id: version
+        run: |
+          set -eu
+          VERSION=$(node -p "require('./package.json').version")
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "Invalid version in package.json: '$VERSION'"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if release already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No release for $TAG yet — will create."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        id: create
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          DEPLOYED_SHA: ${{ github.sha }}
+          IS_PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          set -eu
+          # Target the exact SHA the deploy job validated, not "main". Otherwise
+          # a second commit landing while this workflow runs could move main's
+          # HEAD and the tag would point at code that hasn't been deployed yet.
+          ARGS=("$TAG" --target "$DEPLOYED_SHA" --generate-notes)
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            ARGS+=(--prerelease)
+          fi
+          gh release create "${ARGS[@]}"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+          echo "Released $TAG at $DEPLOYED_SHA. The follow-up publish job will ship npm + ghcr artifacts."
+
+  publish:
+    # Trigger publish.yml explicitly via workflow_call. We can't rely on the
+    # `release: published` event because GitHub blocks recursive triggers from
+    # GITHUB_TOKEN-created releases (workflow_dispatch and workflow_call are
+    # the only permitted exceptions).
+    needs: release
+    if: needs.release.outputs.created == 'true'
+    uses: ./.github/workflows/publish.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+      prerelease: ${{ needs.release.outputs.prerelease == 'true' }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    secrets: inherit
