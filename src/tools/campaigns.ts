@@ -5,6 +5,7 @@ import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { CAMPAIGN_DEFAULT_FIELDS } from "../meta/types/campaign.js";
 import type { Campaign, MetaApiResponse } from "../meta/types/index.js";
+import { READ, CREATE, UPDATE, DELETE, WRITE_WARNING } from "./_register.js";
 
 const objectiveEnum = z.enum([
   "OUTCOME_AWARENESS",
@@ -34,17 +35,21 @@ const specialAdCategoryEnum = z.enum([
 
 export function registerCampaignTools(server: McpServer): void {
   // ─── Get Campaigns ───────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_campaigns",
-    "Get campaigns for an ad account. Filter by status to see active, paused, or all campaigns.",
+  server.registerTool(
+    "ads_get_campaigns",
     {
-      account_id: z.string().describe("Ad account ID"),
-      limit: z.number().min(1).max(100).default(25),
-      status_filter: z
-        .array(statusEnum)
-        .optional()
-        .describe("Filter by status (e.g., ['ACTIVE', 'PAUSED'])"),
-      fields: z.array(z.string()).optional(),
+      description:
+        "Get campaigns for an ad account. Filter by status to see active, paused, or all campaigns.",
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        limit: z.number().min(1).max(100).default(25),
+        status_filter: z
+          .array(statusEnum)
+          .optional()
+          .describe("Filter by status (e.g., ['ACTIVE', 'PAUSED'])"),
+        fields: z.array(z.string()).optional(),
+      },
+      annotations: { ...READ },
     },
     async ({ account_id, limit, status_filter, fields }) => {
       const id = normalizeAccountId(account_id);
@@ -91,12 +96,15 @@ export function registerCampaignTools(server: McpServer): void {
   );
 
   // ─── Get Campaign Details ────────────────────────────────────
-  server.tool(
-    "meta_ads_get_campaign_details",
-    "Get detailed information about a specific campaign.",
+  server.registerTool(
+    "ads_get_campaign_details",
     {
-      campaign_id: z.string().describe("Campaign ID"),
-      fields: z.array(z.string()).optional(),
+      description: "Get detailed information about a specific campaign.",
+      inputSchema: {
+        campaign_id: z.string().describe("Campaign ID"),
+        fields: z.array(z.string()).optional(),
+      },
+      annotations: { ...READ },
     },
     async ({ campaign_id, fields }) => {
       const id = validateMetaId(campaign_id, "campaign");
@@ -118,30 +126,33 @@ export function registerCampaignTools(server: McpServer): void {
   );
 
   // ─── Create Campaign ─────────────────────────────────────────
-  server.tool(
-    "meta_ads_create_campaign",
-    "Create a new Meta advertising campaign. Uses outcome-based (ODAX) objectives. Campaigns are created in PAUSED status by default.",
+  server.registerTool(
+    "ads_create_campaign",
     {
-      account_id: z.string().describe("Ad account ID"),
-      name: z.string().min(1).max(400).describe("Campaign name"),
-      objective: objectiveEnum.describe(
-        "Campaign objective (OUTCOME_AWARENESS, OUTCOME_TRAFFIC, OUTCOME_ENGAGEMENT, OUTCOME_LEADS, OUTCOME_SALES, OUTCOME_APP_PROMOTION)",
-      ),
-      status: z.enum(["ACTIVE", "PAUSED"]).default("PAUSED"),
-      special_ad_categories: z
-        .array(specialAdCategoryEnum)
-        .default(["NONE"])
-        .describe("Special ad categories (NONE, EMPLOYMENT, HOUSING, CREDIT, ISSUES_ELECTIONS_POLITICS)"),
-      daily_budget: z
-        .number()
-        .optional()
-        .describe("Daily budget in cents (e.g., 5000 = $50.00)"),
-      lifetime_budget: z
-        .number()
-        .optional()
-        .describe("Lifetime budget in cents"),
-      bid_strategy: bidStrategyEnum.optional(),
-      buying_type: z.enum(["AUCTION", "RESERVED"]).default("AUCTION"),
+      description: `${WRITE_WARNING}Create a new Meta advertising campaign. Uses outcome-based (ODAX) objectives. Campaigns are created in PAUSED status by default.`,
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        name: z.string().min(1).max(400).describe("Campaign name"),
+        objective: objectiveEnum.describe(
+          "Campaign objective (OUTCOME_AWARENESS, OUTCOME_TRAFFIC, OUTCOME_ENGAGEMENT, OUTCOME_LEADS, OUTCOME_SALES, OUTCOME_APP_PROMOTION)",
+        ),
+        status: z.enum(["ACTIVE", "PAUSED"]).default("PAUSED"),
+        special_ad_categories: z
+          .array(specialAdCategoryEnum)
+          .default(["NONE"])
+          .describe("Special ad categories (NONE, EMPLOYMENT, HOUSING, CREDIT, ISSUES_ELECTIONS_POLITICS)"),
+        daily_budget: z
+          .number()
+          .optional()
+          .describe("Daily budget in cents (e.g., 5000 = $50.00)"),
+        lifetime_budget: z
+          .number()
+          .optional()
+          .describe("Lifetime budget in cents"),
+        bid_strategy: bidStrategyEnum.optional(),
+        buying_type: z.enum(["AUCTION", "RESERVED"]).default("AUCTION"),
+      },
+      annotations: { ...CREATE },
     },
     async ({
       account_id,
@@ -185,16 +196,19 @@ export function registerCampaignTools(server: McpServer): void {
   );
 
   // ─── Update Campaign ─────────────────────────────────────────
-  server.tool(
-    "meta_ads_update_campaign",
-    "Update an existing campaign's name, status, budget, or bid strategy.",
+  server.registerTool(
+    "ads_update_campaign",
     {
-      campaign_id: z.string().describe("Campaign ID to update"),
-      name: z.string().optional(),
-      status: statusEnum.optional(),
-      daily_budget: z.number().optional().describe("Daily budget in cents"),
-      lifetime_budget: z.number().optional().describe("Lifetime budget in cents"),
-      bid_strategy: bidStrategyEnum.optional(),
+      description: `${WRITE_WARNING}Update an existing campaign's name, status, budget, or bid strategy.`,
+      inputSchema: {
+        campaign_id: z.string().describe("Campaign ID to update"),
+        name: z.string().optional(),
+        status: statusEnum.optional(),
+        daily_budget: z.number().optional().describe("Daily budget in cents"),
+        lifetime_budget: z.number().optional().describe("Lifetime budget in cents"),
+        bid_strategy: bidStrategyEnum.optional(),
+      },
+      annotations: { ...UPDATE },
     },
     async ({ campaign_id, name, status, daily_budget, lifetime_budget, bid_strategy }) => {
       const id = validateMetaId(campaign_id, "campaign");
@@ -222,11 +236,14 @@ export function registerCampaignTools(server: McpServer): void {
   );
 
   // ─── Delete Campaign ─────────────────────────────────────────
-  server.tool(
-    "meta_ads_delete_campaign",
-    "Delete a campaign (soft delete — sets status to DELETED). The campaign can still be viewed but will stop serving.",
+  server.registerTool(
+    "ads_delete_campaign",
     {
-      campaign_id: z.string().describe("Campaign ID to delete"),
+      description: `${WRITE_WARNING}Delete a campaign (soft delete — sets status to DELETED). The campaign can still be viewed but will stop serving.`,
+      inputSchema: {
+        campaign_id: z.string().describe("Campaign ID to delete"),
+      },
+      annotations: { ...DELETE },
     },
     async ({ campaign_id }) => {
       const id = validateMetaId(campaign_id, "campaign");

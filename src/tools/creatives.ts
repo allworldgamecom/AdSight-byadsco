@@ -10,6 +10,7 @@ import type { AdCreative, AdImage, AdVideo, MetaApiResponse } from "../meta/type
 import { logger } from "../utils/logger.js";
 import { assertSafePublicUrl, UnsafeUrlError } from "../utils/url-guard.js";
 import { downloadSafePublicImage } from "../utils/safe-download.js";
+import { READ, CREATE, UPDATE, UPLOAD, WRITE_WARNING } from "./_register.js";
 
 const ctaEnum = z.enum([
   // Core actions
@@ -76,13 +77,16 @@ function extractEffectiveLinkUrl(creative: AdCreative): string | undefined {
 
 export function registerCreativeTools(server: McpServer): void {
   // ─── Get Ad Creatives ────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_ad_creatives",
-    "Get creative details for an ad or list creatives for an ad account.",
+  server.registerTool(
+    "ads_get_ad_creatives",
     {
-      ad_id: z.string().optional().describe("Ad ID to get creatives for"),
-      account_id: z.string().optional().describe("Account ID to list all creatives"),
-      limit: z.number().min(1).max(100).default(25),
+      description: "Get creative details for an ad or list creatives for an ad account.",
+      inputSchema: {
+        ad_id: z.string().optional().describe("Ad ID to get creatives for"),
+        account_id: z.string().optional().describe("Account ID to list all creatives"),
+        limit: z.number().min(1).max(100).default(25),
+      },
+      annotations: { ...READ },
     },
     async ({ ad_id, account_id, limit }) => {
       const fieldsParam = buildFieldsParam(undefined, [...CREATIVE_DEFAULT_FIELDS]);
@@ -122,12 +126,15 @@ export function registerCreativeTools(server: McpServer): void {
   );
 
   // ─── Get Creative Details ────────────────────────────────────
-  server.tool(
-    "meta_ads_get_creative_details",
-    "Get detailed information about a specific creative.",
+  server.registerTool(
+    "ads_get_creative_details",
     {
-      creative_id: z.string().describe("Creative ID"),
-      fields: z.array(z.string()).optional(),
+      description: "Get detailed information about a specific creative.",
+      inputSchema: {
+        creative_id: z.string().describe("Creative ID"),
+        fields: z.array(z.string()).optional(),
+      },
+      annotations: { ...READ },
     },
     async ({ creative_id, fields }) => {
       const id = validateMetaId(creative_id, "creative");
@@ -159,25 +166,28 @@ export function registerCreativeTools(server: McpServer): void {
   );
 
   // ─── Create Ad Creative ──────────────────────────────────────
-  server.tool(
-    "meta_ads_create_ad_creative",
-    "Create a new ad creative. Three modes: (1) Build from scratch with image/video + text via object_story_spec, (2) Promote an existing Facebook Page post via object_story_id ('Boost Post'), (3) Promote an existing Instagram post via source_instagram_media_id. The creative can then be used when creating ads. Important: scratch-built video creatives require a thumbnail via image_hash or image_url; Meta rejects video_id without one.",
+  server.registerTool(
+    "ads_create_ad_creative",
     {
-      account_id: z.string().describe("Ad account ID"),
-      name: z.string().min(1).describe("Creative name"),
-      page_id: z.string().optional().describe("Facebook Page ID (required for object_story_spec mode, not needed for object_story_id or source_instagram_media_id)"),
-      object_story_id: z.string().optional().describe("Existing Facebook Page post ID to promote as an ad ('Boost Post' flow). Format: {page_id}_{post_id}. When provided, object_story_spec is NOT built — the existing post is used as-is."),
-      instagram_actor_id: z.string().optional().describe("Instagram account ID (from get_instagram_account). Required when promoting IG posts."),
-      source_instagram_media_id: z.string().optional().describe("Instagram media ID to create a creative from an existing IG post (from get_instagram_media). When provided, image_hash/image_url/video_id are ignored."),
-      image_hash: z.string().optional().describe("Image hash from upload_ad_image"),
-      image_url: z.string().optional().describe("Image URL (alternative to image_hash)"),
-      video_id: z.string().optional().describe("Video ID"),
-      link_url: z.string().optional().describe("Destination URL"),
-      message: z.string().optional().describe("Primary text / body copy"),
-      headline: z.string().optional().describe("Headline text"),
-      description: z.string().optional().describe("Description text (shown below headline)"),
-      call_to_action_type: ctaEnum.optional().describe("Call-to-action button type"),
-      url_tags: z.string().optional().describe("Query string params appended to URLs clicked from the ad (e.g. 'utm_source=meta&utm_medium=paid')"),
+      description: `${WRITE_WARNING}Create a new ad creative. Three modes: (1) Build from scratch with image/video + text via object_story_spec, (2) Promote an existing Facebook Page post via object_story_id ('Boost Post'), (3) Promote an existing Instagram post via source_instagram_media_id. The creative can then be used when creating ads. Important: scratch-built video creatives require a thumbnail via image_hash or image_url; Meta rejects video_id without one.`,
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        name: z.string().min(1).describe("Creative name"),
+        page_id: z.string().optional().describe("Facebook Page ID (required for object_story_spec mode, not needed for object_story_id or source_instagram_media_id)"),
+        object_story_id: z.string().optional().describe("Existing Facebook Page post ID to promote as an ad ('Boost Post' flow). Format: {page_id}_{post_id}. When provided, object_story_spec is NOT built — the existing post is used as-is."),
+        instagram_actor_id: z.string().optional().describe("Instagram account ID (from ads_get_instagram_account). Required when promoting IG posts."),
+        source_instagram_media_id: z.string().optional().describe("Instagram media ID to create a creative from an existing IG post (from ads_get_instagram_media). When provided, image_hash/image_url/video_id are ignored."),
+        image_hash: z.string().optional().describe("Image hash from ads_upload_ad_image"),
+        image_url: z.string().optional().describe("Image URL (alternative to image_hash)"),
+        video_id: z.string().optional().describe("Video ID"),
+        link_url: z.string().optional().describe("Destination URL"),
+        message: z.string().optional().describe("Primary text / body copy"),
+        headline: z.string().optional().describe("Headline text"),
+        description: z.string().optional().describe("Description text (shown below headline)"),
+        call_to_action_type: ctaEnum.optional().describe("Call-to-action button type"),
+        url_tags: z.string().optional().describe("Query string params appended to URLs clicked from the ad (e.g. 'utm_source=meta&utm_medium=paid')"),
+      },
+      annotations: { ...CREATE },
     },
     async ({
       account_id, name, page_id, object_story_id, instagram_actor_id, source_instagram_media_id,
@@ -202,8 +212,6 @@ export function registerCreativeTools(server: McpServer): void {
       const body: Record<string, string | number | boolean> = { name };
 
       if (sourceInstagramMediaIdValidated) {
-        // Mode 3: Promote an existing Instagram post — NO object_story_spec
-        // Docs: https://developers.facebook.com/docs/instagram/ads-api/guides/use-posts-as-ads
         body.source_instagram_media_id = sourceInstagramMediaIdValidated;
         if (pageIdValidated) body.object_id = pageIdValidated;
         if (instagramActorIdValidated) body.instagram_user_id = instagramActorIdValidated;
@@ -214,21 +222,15 @@ export function registerCreativeTools(server: McpServer): void {
           });
         }
       } else if (objectStoryIdValidated) {
-        // Mode 2: Boost an existing Facebook Page post — NO object_story_spec
         body.object_story_id = objectStoryIdValidated;
         if (instagramActorIdValidated) body.instagram_user_id = instagramActorIdValidated;
       } else {
-        // Mode 1: Build creative from scratch with object_story_spec
         if (!pageIdValidated) {
           throw new Error("page_id is required when building a creative from scratch (no object_story_id or source_instagram_media_id provided).");
         }
         if (videoIdValidated && !image_hash && !image_url) {
           throw new Error("video creatives built from scratch require image_hash or image_url as a thumbnail.");
         }
-        // SSRF guard: only validate image_url when it will actually be
-        // forwarded to Meta — i.e. Mode 1 with no image_hash override. Other
-        // modes ignore image_url entirely, so a stale value shouldn't fail
-        // the call.
         if (image_url && !image_hash) {
           try {
             await assertSafePublicUrl(image_url);
@@ -242,7 +244,6 @@ export function registerCreativeTools(server: McpServer): void {
         const objectStorySpec: Record<string, unknown> = { page_id: pageIdValidated };
 
         if (videoIdValidated) {
-          // Video creative — link goes inside CTA, not as top-level field
           const videoData: Record<string, unknown> = { video_id: videoIdValidated };
           if (message) videoData.message = message;
           if (image_hash) videoData.image_hash = image_hash;
@@ -256,7 +257,6 @@ export function registerCreativeTools(server: McpServer): void {
           }
           objectStorySpec.video_data = videoData;
         } else {
-          // Image/link creative — standard link_data structure
           const linkData: Record<string, unknown> = {};
           if (image_hash) linkData.image_hash = image_hash;
           if (image_url && !image_hash) linkData.picture = image_url;
@@ -287,7 +287,6 @@ export function registerCreativeTools(server: McpServer): void {
         body,
       );
 
-      // Fetch effective_object_story_id so the user immediately knows the post ID
       let effectiveStoryId: string | undefined;
       try {
         const created = await metaApiClient.get<{ id: string; effective_object_story_id?: string }>(
@@ -296,7 +295,7 @@ export function registerCreativeTools(server: McpServer): void {
         );
         effectiveStoryId = created.effective_object_story_id;
       } catch {
-        // Non-critical — continue without it
+        // Non-critical
       }
 
       return {
@@ -311,12 +310,15 @@ export function registerCreativeTools(server: McpServer): void {
   );
 
   // ─── Update Ad Creative ──────────────────────────────────────
-  server.tool(
-    "meta_ads_update_ad_creative",
-    "Update an existing creative's name. Note: most creative fields are immutable after creation.",
+  server.registerTool(
+    "ads_update_ad_creative",
     {
-      creative_id: z.string().describe("Creative ID to update"),
-      name: z.string().optional().describe("New name for the creative"),
+      description: `${WRITE_WARNING}Update an existing creative's name. Note: most creative fields are immutable after creation.`,
+      inputSchema: {
+        creative_id: z.string().describe("Creative ID to update"),
+        name: z.string().optional().describe("New name for the creative"),
+      },
+      annotations: { ...UPDATE },
     },
     async ({ creative_id, name }) => {
       const id = validateMetaId(creative_id, "creative");
@@ -334,13 +336,16 @@ export function registerCreativeTools(server: McpServer): void {
   );
 
   // ─── Upload Ad Image ─────────────────────────────────────────
-  server.tool(
-    "meta_ads_upload_ad_image",
-    "Upload an image to Meta for use in ad creatives. Provide an image URL — the server will download and upload it to Meta. Returns an image hash for use in create_ad_creative.",
+  server.registerTool(
+    "ads_upload_ad_image",
     {
-      account_id: z.string().describe("Ad account ID"),
-      image_url: z.string().describe("URL of the image to upload"),
-      name: z.string().optional().describe("Optional name for the image"),
+      description: `${WRITE_WARNING}Upload an image to Meta for use in ad creatives. Provide an image URL — the server will download and upload it to Meta. Returns an image hash for use in ads_create_ad_creative.`,
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        image_url: z.string().describe("URL of the image to upload"),
+        name: z.string().optional().describe("Optional name for the image"),
+      },
+      annotations: { ...UPLOAD },
     },
     async ({ account_id, image_url, name }) => {
       const id = normalizeAccountId(account_id);
@@ -378,7 +383,7 @@ export function registerCreativeTools(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `Image uploaded successfully!\nHash: ${uploaded.hash}\nURL: ${uploaded.url}\nName: ${uploaded.name ?? name ?? "N/A"}\n\nUse the hash "${uploaded.hash}" when creating a creative with create_ad_creative.`,
+              text: `Image uploaded successfully!\nHash: ${uploaded.hash}\nURL: ${uploaded.url}\nName: ${uploaded.name ?? name ?? "N/A"}\n\nUse the hash "${uploaded.hash}" when creating a creative with ads_create_ad_creative.`,
             },
           ],
         };
@@ -392,14 +397,18 @@ export function registerCreativeTools(server: McpServer): void {
   );
 
   // ─── Get Ad Images ────────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_ad_images",
-    "List images uploaded to an ad account with their full URLs. Useful for previewing creative assets without opening Ads Manager.",
+  server.registerTool(
+    "ads_get_ad_images",
     {
-      account_id: z.string().describe("Ad account ID"),
-      hashes: z.array(z.string()).optional().describe("Filter by specific image hashes"),
-      limit: z.number().min(1).max(100).default(25),
-      fields: z.array(z.string()).optional(),
+      description:
+        "List images uploaded to an ad account with their full URLs. Useful for previewing creative assets without opening Ads Manager.",
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        hashes: z.array(z.string()).optional().describe("Filter by specific image hashes"),
+        limit: z.number().min(1).max(100).default(25),
+        fields: z.array(z.string()).optional(),
+      },
+      annotations: { ...READ },
     },
     async ({ account_id, hashes, limit, fields }) => {
       const id = normalizeAccountId(account_id);
@@ -440,13 +449,17 @@ export function registerCreativeTools(server: McpServer): void {
   );
 
   // ─── Get Ad Videos ────────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_ad_videos",
-    "List videos uploaded to an ad account with source URLs and thumbnails. Use this to preview video creatives directly.",
+  server.registerTool(
+    "ads_get_ad_videos",
     {
-      account_id: z.string().describe("Ad account ID"),
-      limit: z.number().min(1).max(100).default(25),
-      fields: z.array(z.string()).optional(),
+      description:
+        "List videos uploaded to an ad account with source URLs and thumbnails. Use this to preview video creatives directly.",
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        limit: z.number().min(1).max(100).default(25),
+        fields: z.array(z.string()).optional(),
+      },
+      annotations: { ...READ },
     },
     async ({ account_id, limit, fields }) => {
       const id = normalizeAccountId(account_id);
@@ -478,12 +491,16 @@ export function registerCreativeTools(server: McpServer): void {
   );
 
   // ─── Get Video Details ────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_video_details",
-    "Get detailed information about a specific video including source URL, thumbnails at different sizes, and processing status.",
+  server.registerTool(
+    "ads_get_video_details",
     {
-      video_id: z.string().describe("Video ID"),
-      fields: z.array(z.string()).optional(),
+      description:
+        "Get detailed information about a specific video including source URL, thumbnails at different sizes, and processing status.",
+      inputSchema: {
+        video_id: z.string().describe("Video ID"),
+        fields: z.array(z.string()).optional(),
+      },
+      annotations: { ...READ },
     },
     async ({ video_id, fields }) => {
       const id = validateMetaId(video_id, "video");
@@ -519,16 +536,19 @@ export function registerCreativeTools(server: McpServer): void {
   );
 
   // ─── Upload Ad Video ────────────────────────────────────────
-  server.tool(
-    "meta_ads_upload_ad_video",
-    "Upload a video to Meta for use in ad creatives. Provide either a public video URL (file_url) or an Instagram media ID (source_instagram_media_id) to upload directly from IG. Returns a video_id for use in create_ad_creative. Useful for promoting Instagram Reels.",
+  server.registerTool(
+    "ads_upload_ad_video",
     {
-      account_id: z.string().describe("Ad account ID"),
-      file_url: z.string().optional().describe("Public URL of the video file (MP4). Required unless source_instagram_media_id is provided. Can be an Instagram Reel media_url."),
-      source_instagram_media_id: z.string().optional().describe("Instagram media ID (V2) to upload an IG video directly to the ad library. Alternative to file_url — simplifies the Reel promotion flow."),
-      name: z.string().optional().describe("Name of the video in the ad library (for organization). Different from title."),
-      title: z.string().optional().describe("Title for the video"),
-      description: z.string().optional().describe("Description for the video"),
+      description: `${WRITE_WARNING}Upload a video to Meta for use in ad creatives. Provide either a public video URL (file_url) or an Instagram media ID (source_instagram_media_id) to upload directly from IG. Returns a video_id for use in ads_create_ad_creative. Useful for promoting Instagram Reels.`,
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        file_url: z.string().optional().describe("Public URL of the video file (MP4). Required unless source_instagram_media_id is provided. Can be an Instagram Reel media_url."),
+        source_instagram_media_id: z.string().optional().describe("Instagram media ID (V2) to upload an IG video directly to the ad library. Alternative to file_url — simplifies the Reel promotion flow."),
+        name: z.string().optional().describe("Name of the video in the ad library (for organization). Different from title."),
+        title: z.string().optional().describe("Title for the video"),
+        description: z.string().optional().describe("Description for the video"),
+      },
+      annotations: { ...UPLOAD },
     },
     async ({ account_id, file_url, source_instagram_media_id, name, title, description }) => {
       const id = normalizeAccountId(account_id);
@@ -538,10 +558,6 @@ export function registerCreativeTools(server: McpServer): void {
       if (source_instagram_media_id) {
         body.source_instagram_media_id = source_instagram_media_id;
       } else if (file_url) {
-        // SSRF guard: Meta will fetch this URL on its end, but we still want to
-        // refuse forwarding URLs that look like internal addresses — both as a
-        // belt-and-braces measure and so the rejection happens with a clear
-        // error here instead of a generic Meta-side failure later.
         try {
           await assertSafePublicUrl(file_url);
         } catch (err) {
@@ -568,7 +584,7 @@ export function registerCreativeTools(server: McpServer): void {
         content: [
           {
             type: "text",
-            text: `Video uploaded successfully!\nID: ${result.id}\nName: ${name ?? "N/A"}\nTitle: ${title ?? "N/A"}\n\nUse this video_id "${result.id}" when creating a creative with create_ad_creative (video_id parameter).`,
+            text: `Video uploaded successfully!\nID: ${result.id}\nName: ${name ?? "N/A"}\nTitle: ${title ?? "N/A"}\n\nUse this video_id "${result.id}" when creating a creative with ads_create_ad_creative (video_id parameter).`,
           },
         ],
       };

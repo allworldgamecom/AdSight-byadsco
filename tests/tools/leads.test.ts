@@ -15,7 +15,7 @@ describe("registerLeadTools", () => {
   it("registers exactly 4 tools", () => {
     const server = createMockMcpServer();
     registerLeadTools(server as never);
-    expect(server.tool).toHaveBeenCalledTimes(4);
+    expect(server.registerTool).toHaveBeenCalledTimes(4);
   });
 
   it("registers tools with correct names", () => {
@@ -23,14 +23,14 @@ describe("registerLeadTools", () => {
     registerLeadTools(server as never);
     const names = server._registeredTools.map((t) => t.name);
     expect(names).toEqual([
-      "meta_ads_get_lead_forms",
-      "meta_ads_get_leads",
-      "meta_ads_get_ad_leads",
-      "meta_ads_create_lead_form",
+      "ads_get_lead_forms",
+      "ads_get_leads",
+      "ads_get_ad_leads",
+      "ads_create_lead_form",
     ]);
   });
 
-  describe("meta_ads_get_lead_forms handler", () => {
+  describe("ads_get_lead_forms handler", () => {
     it("returns formatted lead form list", async () => {
       const server = createMockMcpServer();
       registerLeadTools(server as never);
@@ -61,7 +61,7 @@ describe("registerLeadTools", () => {
     });
   });
 
-  describe("meta_ads_get_leads handler", () => {
+  describe("ads_get_leads handler", () => {
     it("returns lead data with summary", async () => {
       const server = createMockMcpServer();
       registerLeadTools(server as never);
@@ -111,7 +111,7 @@ describe("registerLeadTools", () => {
     });
   });
 
-  describe("meta_ads_create_lead_form handler", () => {
+  describe("ads_create_lead_form handler", () => {
     it("creates a lead form and returns result", async () => {
       const server = createMockMcpServer();
       registerLeadTools(server as never);

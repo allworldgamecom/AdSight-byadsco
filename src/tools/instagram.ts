@@ -11,18 +11,22 @@ import type {
   InstagramMedia,
   MetaApiResponse,
 } from "../meta/types/index.js";
+import { READ } from "./_register.js";
 
 export function registerInstagramTools(server: McpServer): void {
   // ─── Get Instagram Business Account ────────────────────────
-  server.tool(
-    "meta_ads_get_instagram_account",
-    "Get the Instagram Business account linked to a Facebook Page. Returns the Instagram account ID needed for creating ad creatives with Instagram placement.",
+  server.registerTool(
+    "ads_get_instagram_account",
     {
-      page_id: z.string().describe("Facebook Page ID to look up its linked Instagram Business account"),
+      description:
+        "Get the Instagram Business account linked to a Facebook Page. Returns the Instagram account ID needed for creating ad creatives with Instagram placement.",
+      inputSchema: {
+        page_id: z.string().describe("Facebook Page ID to look up its linked Instagram Business account"),
+      },
+      annotations: { ...READ },
     },
     async ({ page_id }) => {
       const id = validateMetaId(page_id, "page");
-      // Request the page with nested instagram_business_account fields
       const nestedFields = INSTAGRAM_ACCOUNT_FIELDS.join(",");
       const result = await metaApiClient.get<{
         instagram_business_account?: InstagramAccount;
@@ -57,12 +61,16 @@ export function registerInstagramTools(server: McpServer): void {
   );
 
   // ─── Get Instagram Media ───────────────────────────────────
-  server.tool(
-    "meta_ads_get_instagram_media",
-    "List recent media posts from an Instagram Business account. Returns media IDs that can be used with source_instagram_media_id in create_ad_creative to promote existing posts.",
+  server.registerTool(
+    "ads_get_instagram_media",
     {
-      instagram_account_id: z.string().describe("Instagram Business account ID (from get_instagram_account)"),
-      limit: z.number().min(1).max(100).default(25).describe("Number of posts to return"),
+      description:
+        "List recent media posts from an Instagram Business account. Returns media IDs that can be used with source_instagram_media_id in create_ad_creative to promote existing posts.",
+      inputSchema: {
+        instagram_account_id: z.string().describe("Instagram Business account ID (from ads_get_instagram_account)"),
+        limit: z.number().min(1).max(100).default(25).describe("Number of posts to return"),
+      },
+      annotations: { ...READ },
     },
     async ({ instagram_account_id, limit }) => {
       const id = validateMetaId(instagram_account_id, "instagram_account");

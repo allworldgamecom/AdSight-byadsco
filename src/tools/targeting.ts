@@ -9,6 +9,7 @@ import type {
   GeoLocationResult,
   MetaApiResponse,
 } from "../meta/types/index.js";
+import { READ } from "./_register.js";
 
 interface TargetingSentenceLine {
   content: string;
@@ -30,12 +31,16 @@ const locationTypeEnum = z.enum([
 
 export function registerTargetingTools(server: McpServer): void {
   // ─── Search Interests ────────────────────────────────────────
-  server.tool(
-    "meta_ads_search_interests",
-    "Search for interest targeting options by keyword. Returns matching interests with audience sizes.",
+  server.registerTool(
+    "ads_search_interests",
     {
-      query: z.string().min(1).describe("Interest keyword to search"),
-      limit: z.number().min(1).max(100).default(25),
+      description:
+        "Search for interest targeting options by keyword. Returns matching interests with audience sizes.",
+      inputSchema: {
+        query: z.string().min(1).describe("Interest keyword to search"),
+        limit: z.number().min(1).max(100).default(25),
+      },
+      annotations: { ...READ },
     },
     async ({ query, limit }) => {
       const response = await metaApiClient.get<MetaApiResponse<Interest>>(
@@ -64,15 +69,19 @@ export function registerTargetingTools(server: McpServer): void {
   );
 
   // ─── Get Interest Suggestions ────────────────────────────────
-  server.tool(
-    "meta_ads_get_interest_suggestions",
-    "Get interest suggestions based on existing interests. Useful for expanding targeting.",
+  server.registerTool(
+    "ads_get_interest_suggestions",
     {
-      interest_list: z
-        .array(z.string())
-        .min(1)
-        .describe("List of interest names to get suggestions for"),
-      limit: z.number().min(1).max(100).default(25),
+      description:
+        "Get interest suggestions based on existing interests. Useful for expanding targeting.",
+      inputSchema: {
+        interest_list: z
+          .array(z.string())
+          .min(1)
+          .describe("List of interest names to get suggestions for"),
+        limit: z.number().min(1).max(100).default(25),
+      },
+      annotations: { ...READ },
     },
     async ({ interest_list, limit }) => {
       const response = await metaApiClient.get<MetaApiResponse<Interest>>(
@@ -105,11 +114,15 @@ export function registerTargetingTools(server: McpServer): void {
   );
 
   // ─── Search Behaviors ────────────────────────────────────────
-  server.tool(
-    "meta_ads_search_behaviors",
-    "Get behavior targeting options. Behaviors include purchase behavior, device usage, travel, etc.",
+  server.registerTool(
+    "ads_search_behaviors",
     {
-      limit: z.number().min(1).max(200).default(50),
+      description:
+        "Get behavior targeting options. Behaviors include purchase behavior, device usage, travel, etc.",
+      inputSchema: {
+        limit: z.number().min(1).max(200).default(50),
+      },
+      annotations: { ...READ },
     },
     async ({ limit }) => {
       const response = await metaApiClient.get<MetaApiResponse<Behavior>>(
@@ -138,12 +151,16 @@ export function registerTargetingTools(server: McpServer): void {
   );
 
   // ─── Search Demographics ─────────────────────────────────────
-  server.tool(
-    "meta_ads_search_demographics",
-    "Get demographic targeting options by category (e.g., income, family status, education, life events, industries).",
+  server.registerTool(
+    "ads_search_demographics",
     {
-      demographic_class: demographicClassEnum.describe("Demographic category to search"),
-      limit: z.number().min(1).max(200).default(50),
+      description:
+        "Get demographic targeting options by category (e.g., income, family status, education, life events, industries).",
+      inputSchema: {
+        demographic_class: demographicClassEnum.describe("Demographic category to search"),
+        limit: z.number().min(1).max(200).default(50),
+      },
+      annotations: { ...READ },
     },
     async ({ demographic_class, limit }) => {
       const response = await metaApiClient.get<MetaApiResponse<DemographicOption>>(
@@ -172,16 +189,20 @@ export function registerTargetingTools(server: McpServer): void {
   );
 
   // ─── Search Geo Locations ────────────────────────────────────
-  server.tool(
-    "meta_ads_search_geo_locations",
-    "Search for geographic targeting locations (countries, regions, cities, zip codes, etc.).",
+  server.registerTool(
+    "ads_search_geo_locations",
     {
-      query: z.string().min(1).describe("Location to search for"),
-      location_types: z
-        .array(locationTypeEnum)
-        .default(["country", "region", "city"])
-        .describe("Types of locations to include"),
-      limit: z.number().min(1).max(100).default(25),
+      description:
+        "Search for geographic targeting locations (countries, regions, cities, zip codes, etc.).",
+      inputSchema: {
+        query: z.string().min(1).describe("Location to search for"),
+        location_types: z
+          .array(locationTypeEnum)
+          .default(["country", "region", "city"])
+          .describe("Types of locations to include"),
+        limit: z.number().min(1).max(100).default(25),
+      },
+      annotations: { ...READ },
     },
     async ({ query, location_types, limit }) => {
       const response = await metaApiClient.get<MetaApiResponse<GeoLocationResult>>(
@@ -215,14 +236,18 @@ export function registerTargetingTools(server: McpServer): void {
   );
 
   // ─── Estimate Audience Size ──────────────────────────────────
-  server.tool(
-    "meta_ads_estimate_audience_size",
-    "Estimate the audience size for a targeting specification. Useful for validating targeting before creating ad sets.",
+  server.registerTool(
+    "ads_estimate_audience_size",
     {
-      account_id: z.string().describe("Ad account ID"),
-      targeting_spec: z
-        .record(z.unknown())
-        .describe("Targeting specification (same format as create_adset targeting)"),
+      description:
+        "Estimate the audience size for a targeting specification. Useful for validating targeting before creating ad sets.",
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        targeting_spec: z
+          .record(z.unknown())
+          .describe("Targeting specification (same format as ads_create_ad_set targeting)"),
+      },
+      annotations: { ...READ },
     },
     async ({ account_id, targeting_spec }) => {
       const id = normalizeAccountId(account_id);
@@ -261,16 +286,20 @@ export function registerTargetingTools(server: McpServer): void {
   );
 
   // ─── Get Targeting Description ──────────────────────────────
-  server.tool(
-    "meta_ads_get_targeting_description",
-    "Get a human-readable description of an ad's targeting specification. Can also preview what a targeting_spec would describe before creating an ad set.",
+  server.registerTool(
+    "ads_get_targeting_description",
     {
-      ad_id: z.string().optional().describe("Ad ID to get targeting description for"),
-      account_id: z.string().optional().describe("Ad account ID (required when using targeting_spec)"),
-      targeting_spec: z
-        .record(z.unknown())
-        .optional()
-        .describe("Targeting spec to preview (same format as create_adset targeting). Requires account_id."),
+      description:
+        "Get a human-readable description of an ad's targeting specification. Can also preview what a targeting_spec would describe before creating an ad set.",
+      inputSchema: {
+        ad_id: z.string().optional().describe("Ad ID to get targeting description for"),
+        account_id: z.string().optional().describe("Ad account ID (required when using targeting_spec)"),
+        targeting_spec: z
+          .record(z.unknown())
+          .optional()
+          .describe("Targeting spec to preview (same format as ads_create_ad_set targeting). Requires account_id."),
+      },
+      annotations: { ...READ },
     },
     async ({ ad_id, account_id, targeting_spec }) => {
       let path: string;

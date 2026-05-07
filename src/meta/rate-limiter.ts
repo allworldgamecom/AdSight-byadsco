@@ -258,7 +258,7 @@ export class RateLimiter {
   }
 
   /**
-   * Snapshot for observability / the `meta_ads_rate_status` tool.
+   * Snapshot for observability / the `ads_rate_status` tool.
    */
   snapshot(): UsageBucket[] {
     return Array.from(this.buckets.values()).map((b) => ({ ...b }));

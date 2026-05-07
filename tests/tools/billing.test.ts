@@ -15,7 +15,7 @@ describe("registerBillingTools", () => {
   it("registers exactly 3 tools", () => {
     const server = createMockMcpServer();
     registerBillingTools(server as never);
-    expect(server.tool).toHaveBeenCalledTimes(3);
+    expect(server.registerTool).toHaveBeenCalledTimes(3);
   });
 
   it("registers tools with correct names", () => {
@@ -23,13 +23,13 @@ describe("registerBillingTools", () => {
     registerBillingTools(server as never);
     const names = server._registeredTools.map((t) => t.name);
     expect(names).toEqual([
-      "meta_ads_get_billing_info",
-      "meta_ads_get_spend_limit",
-      "meta_ads_update_spend_cap",
+      "ads_get_billing_info",
+      "ads_get_spend_limit",
+      "ads_update_spend_cap",
     ]);
   });
 
-  describe("meta_ads_get_billing_info handler", () => {
+  describe("ads_get_billing_info handler", () => {
     it("returns formatted billing info", async () => {
       const server = createMockMcpServer();
       registerBillingTools(server as never);
@@ -66,7 +66,7 @@ describe("registerBillingTools", () => {
     });
   });
 
-  describe("meta_ads_get_spend_limit handler", () => {
+  describe("ads_get_spend_limit handler", () => {
     it("returns spend limit info with usage percentage", async () => {
       const server = createMockMcpServer();
       registerBillingTools(server as never);
@@ -92,7 +92,7 @@ describe("registerBillingTools", () => {
     });
   });
 
-  describe("meta_ads_update_spend_cap handler", () => {
+  describe("ads_update_spend_cap handler", () => {
     it("updates spend cap and returns confirmation", async () => {
       const server = createMockMcpServer();
       registerBillingTools(server as never);

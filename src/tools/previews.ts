@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
 import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import type { MetaApiResponse } from "../meta/types/index.js";
+import { READ } from "./_register.js";
 
 const adFormatEnum = z.enum([
   // Core placements
@@ -48,12 +49,16 @@ interface AdPreview {
 
 export function registerPreviewTools(server: McpServer): void {
   // ─── Get Ad Preview ───────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_ad_preview",
-    "Generate a preview of an existing ad in a specific placement format (feed, stories, reels, etc.). Returns HTML preview and shareable link.",
+  server.registerTool(
+    "ads_get_ad_preview",
     {
-      ad_id: z.string().describe("Ad ID to preview"),
-      ad_format: adFormatEnum.default("MOBILE_FEED_STANDARD").describe("Ad placement format"),
+      description:
+        "Generate a preview of an existing ad in a specific placement format (feed, stories, reels, etc.). Returns HTML preview and shareable link.",
+      inputSchema: {
+        ad_id: z.string().describe("Ad ID to preview"),
+        ad_format: adFormatEnum.default("MOBILE_FEED_STANDARD").describe("Ad placement format"),
+      },
+      annotations: { ...READ },
     },
     async ({ ad_id, ad_format }) => {
       const id = validateMetaId(ad_id, "ad");
@@ -69,11 +74,6 @@ export function registerPreviewTools(server: McpServer): void {
         };
       }
 
-      // Extract iframe src URL from the HTML body. We deliberately do NOT
-      // forward the raw Meta HTML to the agent (CODE-A4 audit finding) —
-      // a browser-based MCP client that renders text content as HTML
-      // would execute scripts inside the iframe. The shareable URL is
-      // sufficient for every documented use case.
       const html = previews[0].body;
       const iframeSrcMatch = html.match(/src="([^"]+)"/);
       const previewUrl = iframeSrcMatch ? iframeSrcMatch[1].replace(/&amp;/g, "&") : null;
@@ -95,52 +95,56 @@ export function registerPreviewTools(server: McpServer): void {
   );
 
   // ─── Generate Preview from Creative Spec ──────────────────────
-  server.tool(
-    "meta_ads_generate_preview",
-    "Generate a preview from a creative specification without creating an actual ad. Useful for previewing creative concepts before launch.",
+  server.registerTool(
+    "ads_generate_preview",
     {
-      account_id: z.string().describe("Ad account ID"),
-      ad_format: adFormatEnum.default("MOBILE_FEED_STANDARD"),
-      creative: z
-        .object({
-          object_story_spec: z
-            .object({
-              page_id: z.string().describe("Facebook Page ID"),
-              link_data: z
-                .object({
-                  image_hash: z.string().optional(),
-                  picture: z.string().optional().describe("Image URL"),
-                  link: z.string().optional().describe("Destination URL"),
-                  message: z.string().optional().describe("Primary text"),
-                  name: z.string().optional().describe("Headline"),
-                  description: z.string().optional(),
-                  call_to_action: z
-                    .object({
-                      type: z.string(),
-                      value: z.object({ link: z.string().optional() }).optional(),
-                    })
-                    .optional(),
-                })
-                .optional(),
-              video_data: z
-                .object({
-                  video_id: z.string().optional(),
-                  image_hash: z.string().optional(),
-                  message: z.string().optional(),
-                  title: z.string().optional().describe("Video headline"),
-                  description: z.string().optional(),
-                  call_to_action: z
-                    .object({
-                      type: z.string(),
-                      value: z.object({ link: z.string().optional() }).optional(),
-                    })
-                    .optional(),
-                })
-                .optional(),
-            })
-            .describe("Creative story spec"),
-        })
-        .describe("Creative specification"),
+      description:
+        "Generate a preview from a creative specification without creating an actual ad. Useful for previewing creative concepts before launch.",
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        ad_format: adFormatEnum.default("MOBILE_FEED_STANDARD"),
+        creative: z
+          .object({
+            object_story_spec: z
+              .object({
+                page_id: z.string().describe("Facebook Page ID"),
+                link_data: z
+                  .object({
+                    image_hash: z.string().optional(),
+                    picture: z.string().optional().describe("Image URL"),
+                    link: z.string().optional().describe("Destination URL"),
+                    message: z.string().optional().describe("Primary text"),
+                    name: z.string().optional().describe("Headline"),
+                    description: z.string().optional(),
+                    call_to_action: z
+                      .object({
+                        type: z.string(),
+                        value: z.object({ link: z.string().optional() }).optional(),
+                      })
+                      .optional(),
+                  })
+                  .optional(),
+                video_data: z
+                  .object({
+                    video_id: z.string().optional(),
+                    image_hash: z.string().optional(),
+                    message: z.string().optional(),
+                    title: z.string().optional().describe("Video headline"),
+                    description: z.string().optional(),
+                    call_to_action: z
+                      .object({
+                        type: z.string(),
+                        value: z.object({ link: z.string().optional() }).optional(),
+                      })
+                      .optional(),
+                  })
+                  .optional(),
+              })
+              .describe("Creative story spec"),
+          })
+          .describe("Creative specification"),
+      },
+      annotations: { ...READ },
     },
     async ({ account_id, ad_format, creative }) => {
       const accountPath = normalizeAccountId(account_id);

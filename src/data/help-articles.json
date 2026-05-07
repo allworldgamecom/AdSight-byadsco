@@ -1,0 +1,107 @@
+[
+  {
+    "id": "1213903128789012",
+    "title": "Why was my ad rejected?",
+    "url": "https://www.facebook.com/business/help/1213903128789012",
+    "summary": "Common reasons ads are rejected: prohibited content, restricted content (alcohol, gambling, dating), low-quality landing pages, before/after images, sensational language. Edit and resubmit, or appeal via the Account Quality dashboard.",
+    "tags": ["rejection", "disapproved", "policy", "appeal"]
+  },
+  {
+    "id": "975570072950727",
+    "title": "Ad review and policy enforcement",
+    "url": "https://www.facebook.com/business/help/975570072950727",
+    "summary": "Meta reviews ads against advertising policies before delivery. Reviews typically take 24 hours. If rejected, request a review from Account Quality. Repeated violations can disable the ad account.",
+    "tags": ["review", "policy", "enforcement", "in_review"]
+  },
+  {
+    "id": "1773206210262490",
+    "title": "Special Ad Categories explained",
+    "url": "https://www.facebook.com/business/help/1773206210262490",
+    "summary": "Ads about credit, employment, housing, social issues / elections / politics must declare a Special Ad Category. This restricts targeting (no age, gender, ZIP, lookalikes from custom audiences with sensitive data). Required by law in many regions.",
+    "tags": ["special_ad_category", "compliance", "credit", "employment", "housing", "politics"]
+  },
+  {
+    "id": "1612422259487523",
+    "title": "Set up the Meta Pixel",
+    "url": "https://www.facebook.com/business/help/1612422259487523",
+    "summary": "Install the Meta Pixel base code on your website and configure standard events (PageView, ViewContent, AddToCart, Purchase). Test with the Meta Pixel Helper Chrome extension or the Test Events tool in Events Manager.",
+    "tags": ["pixel", "tracking", "events", "setup", "installation"]
+  },
+  {
+    "id": "298814337909123",
+    "title": "Conversions API setup",
+    "url": "https://www.facebook.com/business/help/298814337909123",
+    "summary": "Send conversion events server-to-server with the Conversions API for resilience against ad blockers and iOS 14.5+. Combine with the pixel via deduplication keys (event_id). Improves match rate and EMQ score.",
+    "tags": ["capi", "conversions_api", "tracking", "server_side", "ios14"]
+  },
+  {
+    "id": "552406167160419",
+    "title": "Why isn't my ad spending my full budget?",
+    "url": "https://www.facebook.com/business/help/552406167160419",
+    "summary": "Ad set may be in learning phase, audience too narrow, bid too low, or scheduling restrictive. Check delivery status, broaden audience, raise bid cap, and verify scheduling. Conversion-optimized ad sets need ~50 conversions/week to exit learning.",
+    "tags": ["delivery", "underspending", "learning_phase", "budget", "pacing"]
+  },
+  {
+    "id": "1129903274169049",
+    "title": "Account spending limits and billing",
+    "url": "https://www.facebook.com/business/help/1129903274169049",
+    "summary": "Set a spend cap to limit total account spend. Daily spend limits are set per ad set, not account-wide. Manage payment methods, billing thresholds, and tax info in Billing & payments.",
+    "tags": ["spend_cap", "billing", "payment", "limits"]
+  },
+  {
+    "id": "211661229584902",
+    "title": "Custom audience PII hashing",
+    "url": "https://www.facebook.com/business/help/211661229584902",
+    "summary": "Customer-list custom audiences must be SHA-256 hashed before upload. Lowercase email and phone before hashing. Meta supports email, phone (E.164), first name, last name, city, state, country, ZIP, gender, DOB, and external_id.",
+    "tags": ["custom_audience", "hashing", "sha256", "pii", "customer_list"]
+  },
+  {
+    "id": "164749007013531",
+    "title": "Lookalike audience requirements",
+    "url": "https://www.facebook.com/business/help/164749007013531",
+    "summary": "Source audience must have ~100+ matched users in the target country. Ratio 1-10% controls similarity vs reach. Lookalikes typically take ~24h to compute users; ID is returned immediately but reach starts at zero.",
+    "tags": ["lookalike", "audience", "ratio", "similarity", "minimum_size"]
+  },
+  {
+    "id": "1438588669953374",
+    "title": "Advantage+ Audience automation",
+    "url": "https://www.facebook.com/business/help/1438588669953374",
+    "summary": "Advantage+ Audience uses ML to find users likely to convert beyond your specified targeting. Set targeting_automation.advantage_audience=1. Often outperforms detailed targeting; mandatory in many objectives.",
+    "tags": ["advantage_plus", "audience_automation", "ml", "targeting"]
+  },
+  {
+    "id": "1646740498929515",
+    "title": "Lead form best practices",
+    "url": "https://www.facebook.com/business/help/1646740498929515",
+    "summary": "Use 3-5 questions max, prefer pre-filled fields (email, phone), include a privacy policy URL (required), set up CRM integration to receive leads in real time. Higher-intent forms have a confirmation question.",
+    "tags": ["lead_form", "lead_gen", "questions", "crm"]
+  },
+  {
+    "id": "1779345553834601",
+    "title": "Why are my CPMs higher than usual?",
+    "url": "https://www.facebook.com/business/help/1779345553834601",
+    "summary": "CPMs rise during high-competition periods (Q4, elections, holidays), in narrow audiences, with low quality rankings, or with restrictive targeting. Broaden audiences, improve creative quality (Quality ranking), or lower bid caps.",
+    "tags": ["cpm", "auction", "competition", "pricing"]
+  },
+  {
+    "id": "1349408984995362",
+    "title": "Quality, Engagement, and Conversion Ranking",
+    "url": "https://www.facebook.com/business/help/1349408984995362",
+    "summary": "Three rankings appear at ad level after ~500 impressions: Quality (vs ads competing for the same audience), Engagement Rate, Conversion Rate. 'Below average' or 'Below average (bottom 10%)' indicates underperforming creative — refresh.",
+    "tags": ["ranking", "quality", "engagement_rate", "conversion_rate", "auction"]
+  },
+  {
+    "id": "452727535707134",
+    "title": "Ad set learning phase",
+    "url": "https://www.facebook.com/business/help/452727535707134",
+    "summary": "Newly created or significantly edited ad sets enter a learning phase where Meta optimizes delivery. Exit learning requires ~50 optimization events in 7 days. Avoid frequent edits during learning — they reset it.",
+    "tags": ["learning_phase", "optimization", "delivery"]
+  },
+  {
+    "id": "187286253057852",
+    "title": "Aggregated Event Measurement (AEM)",
+    "url": "https://www.facebook.com/business/help/187286253057852",
+    "summary": "AEM aggregates web events from iOS 14.5+ users who opted out of tracking. Configure 8 prioritized events per domain in Events Manager. Required for accurate iOS 14.5+ measurement.",
+    "tags": ["aem", "aggregated_event_measurement", "ios14", "att", "domain"]
+  }
+]

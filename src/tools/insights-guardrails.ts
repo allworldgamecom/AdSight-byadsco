@@ -61,7 +61,7 @@ export function enforceInsightsGuardrails(input: InsightsGuardInput): void {
     if (tooWide) {
       throw new McpError(
         ErrorCode.InvalidParams,
-        "Wide date ranges (maximum, >90 days) combined with breakdowns will time out or trip data-per-call limits in a sync request. Use meta_ads_create_async_report (or meta_ads_run_report_and_wait) instead.",
+        "Wide date ranges (maximum, >90 days) combined with breakdowns will time out or trip data-per-call limits in a sync request. Use ads_create_async_report (or ads_run_report_and_wait) instead.",
       );
     }
   }

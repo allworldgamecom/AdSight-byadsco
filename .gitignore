@@ -42,3 +42,6 @@ coverage/
 
 # Build artifacts
 *.tsbuildinfo
+
+# Local Firecrawl scraping cache (never committed)
+.firecrawl/

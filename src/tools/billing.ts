@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
 import { normalizeAccountId, formatBudget } from "../utils/format.js";
+import { READ, UPDATE, WRITE_WARNING } from "./_register.js";
 
 interface BillingInfo {
   id: string;
@@ -74,11 +75,15 @@ const ACCOUNT_STATUS_MAP: Record<number, string> = {
 
 export function registerBillingTools(server: McpServer): void {
   // ─── Get Billing Info ─────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_billing_info",
-    "Get billing and payment information for an ad account, including funding source, account status, and spend data.",
+  server.registerTool(
+    "ads_get_billing_info",
     {
-      account_id: z.string().describe("Ad account ID"),
+      description:
+        "Get billing and payment information for an ad account, including funding source, account status, and spend data.",
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+      },
+      annotations: { ...READ },
     },
     async ({ account_id }) => {
       const id = normalizeAccountId(account_id);
@@ -124,11 +129,15 @@ export function registerBillingTools(server: McpServer): void {
   );
 
   // ─── Get Spend Limit ──────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_spend_limit",
-    "Get spending limits and current spend for an ad account. Shows spend cap, amount spent, daily limits, and remaining balance.",
+  server.registerTool(
+    "ads_get_spend_limit",
     {
-      account_id: z.string().describe("Ad account ID"),
+      description:
+        "Get spending limits and current spend for an ad account. Shows spend cap, amount spent, daily limits, and remaining balance.",
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+      },
+      annotations: { ...READ },
     },
     async ({ account_id }) => {
       const id = normalizeAccountId(account_id);
@@ -174,15 +183,18 @@ export function registerBillingTools(server: McpServer): void {
   );
 
   // ─── Update Spend Cap ─────────────────────────────────────────
-  server.tool(
-    "meta_ads_update_spend_cap",
-    "Update the spending limit (spend cap) for an ad account. Set to 0 or omit to remove the cap.",
+  server.registerTool(
+    "ads_update_spend_cap",
     {
-      account_id: z.string().describe("Ad account ID"),
-      spend_cap: z
-        .number()
-        .min(0)
-        .describe("New spend cap in cents (e.g., 100000 = $1,000.00). Use 0 to remove."),
+      description: `${WRITE_WARNING}Update the spending limit (spend cap) for an ad account. Set to 0 or omit to remove the cap.`,
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        spend_cap: z
+          .number()
+          .min(0)
+          .describe("New spend cap in cents (e.g., 100000 = $1,000.00). Use 0 to remove."),
+      },
+      annotations: { ...UPDATE },
     },
     async ({ account_id, spend_cap }) => {
       const id = normalizeAccountId(account_id);

@@ -12,23 +12,20 @@ describe("registerInsightsTools", () => {
     vi.restoreAllMocks();
   });
 
-  it("registers exactly 2 tools", () => {
+  it("registers exactly 1 tool (account_insights replaced by insights view in v3)", () => {
     const server = createMockMcpServer();
     registerInsightsTools(server as never);
-    expect(server.tool).toHaveBeenCalledTimes(2);
+    expect(server.registerTool).toHaveBeenCalledTimes(1);
   });
 
-  it("registers tools with correct names", () => {
+  it("registers tool with correct name", () => {
     const server = createMockMcpServer();
     registerInsightsTools(server as never);
     const names = server._registeredTools.map((t) => t.name);
-    expect(names).toEqual([
-      "meta_ads_get_insights",
-      "meta_ads_get_account_insights",
-    ]);
+    expect(names).toEqual(["ads_get_insights"]);
   });
 
-  describe("meta_ads_get_insights handler", () => {
+  describe("ads_get_insights handler", () => {
     it("returns formatted insights data", async () => {
       const server = createMockMcpServer();
       registerInsightsTools(server as never);
@@ -126,38 +123,6 @@ describe("registerInsightsTools", () => {
 
       expect(result.content[0].text).toContain("link_click");
       expect(result.content[0].text).toContain("purchase");
-    });
-  });
-
-  describe("meta_ads_get_account_insights handler", () => {
-    it("normalizes account ID and returns insights", async () => {
-      const server = createMockMcpServer();
-      registerInsightsTools(server as never);
-
-      const mockData = {
-        data: [
-          {
-            date_start: "2024-01-01",
-            date_stop: "2024-01-31",
-            impressions: "10000",
-            spend: "500.00",
-          },
-        ],
-      };
-
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse(mockData)));
-
-      const handler = server._registeredTools[1].handler;
-      const result = await handler({
-        account_id: "123",
-        date_preset: "last_30d",
-        fields: undefined,
-      }) as { content: Array<{ type: string; text: string }> };
-
-      expect(result.content[0].text).toContain("Account Insights");
-
-      const url = new URL(vi.mocked(fetch).mock.calls[0][0] as string);
-      expect(url.pathname).toContain("act_123");
     });
   });
 });

@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
 import { truncateResponse, validateMetaId } from "../utils/format.js";
 import type { MetaApiResponse } from "../meta/types/index.js";
+import { READ, CREATE, TOGGLE, DELETE, WRITE_WARNING } from "./_register.js";
 
 interface AdComment {
   id: string;
@@ -18,22 +19,25 @@ const COMMENT_FIELDS = "id,message,from,created_time,is_hidden,like_count,commen
 
 export function registerCommentTools(server: McpServer): void {
   // ─── Get Ad Comments ──────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_ad_comments",
-    "List comments on an ad post. Uses the ad's effective_object_story_id to fetch comments. Important for compliance monitoring in regulated industries.",
+  server.registerTool(
+    "ads_get_ad_comments",
     {
-      ad_id: z.string().optional().describe("Ad ID — will resolve to the post automatically"),
-      post_id: z.string().optional().describe("Post ID directly (effective_object_story_id)"),
-      limit: z.number().min(1).max(100).default(50),
-      filter: z
-        .enum(["toplevel", "stream"])
-        .default("toplevel")
-        .describe("Filter: toplevel (only direct comments) or stream (all including replies)"),
+      description:
+        "List comments on an ad post. Uses the ad's effective_object_story_id to fetch comments. Important for compliance monitoring in regulated industries.",
+      inputSchema: {
+        ad_id: z.string().optional().describe("Ad ID — will resolve to the post automatically"),
+        post_id: z.string().optional().describe("Post ID directly (effective_object_story_id)"),
+        limit: z.number().min(1).max(100).default(50),
+        filter: z
+          .enum(["toplevel", "stream"])
+          .default("toplevel")
+          .describe("Filter: toplevel (only direct comments) or stream (all including replies)"),
+      },
+      annotations: { ...READ },
     },
     async ({ ad_id, post_id, limit, filter }) => {
       let objectId = post_id ? validateMetaId(post_id, "post") : undefined;
 
-      // If ad_id provided, resolve to effective_object_story_id
       if (!objectId && ad_id) {
         const adId = validateMetaId(ad_id, "ad");
         const ad = await metaApiClient.get<{ effective_object_story_id?: string }>(
@@ -87,12 +91,15 @@ export function registerCommentTools(server: McpServer): void {
   );
 
   // ─── Hide Comment ─────────────────────────────────────────────
-  server.tool(
-    "meta_ads_hide_comment",
-    "Hide or unhide a comment on an ad post. Hidden comments are only visible to the commenter and their friends.",
+  server.registerTool(
+    "ads_hide_comment",
     {
-      comment_id: z.string().describe("Comment ID to hide/unhide"),
-      is_hidden: z.boolean().default(true).describe("true to hide, false to unhide"),
+      description: `${WRITE_WARNING}Hide or unhide a comment on an ad post. Hidden comments are only visible to the commenter and their friends.`,
+      inputSchema: {
+        comment_id: z.string().describe("Comment ID to hide/unhide"),
+        is_hidden: z.boolean().default(true).describe("true to hide, false to unhide"),
+      },
+      annotations: { ...TOGGLE },
     },
     async ({ comment_id, is_hidden }) => {
       const id = validateMetaId(comment_id, "post");
@@ -113,12 +120,15 @@ export function registerCommentTools(server: McpServer): void {
   );
 
   // ─── Reply to Comment ─────────────────────────────────────────
-  server.tool(
-    "meta_ads_reply_comment",
-    "Reply to a comment on an ad post. The reply will appear as a nested comment.",
+  server.registerTool(
+    "ads_reply_comment",
     {
-      comment_id: z.string().describe("Comment ID to reply to"),
-      message: z.string().min(1).describe("Reply message text"),
+      description: `${WRITE_WARNING}Reply to a comment on an ad post. The reply will appear as a nested comment. Re-running creates duplicate replies — not idempotent.`,
+      inputSchema: {
+        comment_id: z.string().describe("Comment ID to reply to"),
+        message: z.string().min(1).describe("Reply message text"),
+      },
+      annotations: { ...CREATE },
     },
     async ({ comment_id, message }) => {
       const id = validateMetaId(comment_id, "post");
@@ -139,11 +149,14 @@ export function registerCommentTools(server: McpServer): void {
   );
 
   // ─── Delete Comment ───────────────────────────────────────────
-  server.tool(
-    "meta_ads_delete_comment",
-    "Delete a comment on an ad post. This action cannot be undone.",
+  server.registerTool(
+    "ads_delete_comment",
     {
-      comment_id: z.string().describe("Comment ID to delete"),
+      description: `${WRITE_WARNING}Delete a comment on an ad post. This action cannot be undone.`,
+      inputSchema: {
+        comment_id: z.string().describe("Comment ID to delete"),
+      },
+      annotations: { ...DELETE },
     },
     async ({ comment_id }) => {
       const id = validateMetaId(comment_id, "post");

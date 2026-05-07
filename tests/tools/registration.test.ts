@@ -3,10 +3,12 @@ import { registerAllTools } from "../../src/tools/index.js";
 import { createMockMcpServer } from "../setup.js";
 
 describe("registerAllTools", () => {
-  it("registers exactly 80 tools total", () => {
+  it("registers exactly 93 tools total", () => {
+    // 79 v2 tools renamed (with account_insights removed → 79) + 14 new in v3:
+    //   3 entity helpers + 5 insight views + 3 diagnostics + 1 help + 2 macros
     const server = createMockMcpServer();
     registerAllTools(server as never);
-    expect(server.tool).toHaveBeenCalledTimes(80);
+    expect(server.registerTool).toHaveBeenCalledTimes(93);
   });
 
   it("registers all tools with unique names", () => {
@@ -18,12 +20,13 @@ describe("registerAllTools", () => {
     expect(uniqueNames.size).toBe(names.length);
   });
 
-  it("all tool names start with meta_ads_", () => {
+  it("all tool names start with ads_ (no meta_ prefix)", () => {
     const server = createMockMcpServer();
     registerAllTools(server as never);
 
     for (const tool of server._registeredTools) {
-      expect(tool.name).toMatch(/^meta_ads_/);
+      expect(tool.name).toMatch(/^ads_/);
+      expect(tool.name).not.toMatch(/^meta_/);
     }
   });
 
@@ -45,6 +48,34 @@ describe("registerAllTools", () => {
     }
   });
 
+  it("all tools declare ToolAnnotations", () => {
+    const server = createMockMcpServer();
+    registerAllTools(server as never);
+
+    for (const tool of server._registeredTools) {
+      expect(tool.annotations).toBeDefined();
+      const a = tool.annotations!;
+      // Either readOnlyHint=true OR a destructiveHint must be present
+      const isAnnotated =
+        a.readOnlyHint === true
+        || a.destructiveHint !== undefined;
+      expect(isAnnotated).toBe(true);
+    }
+  });
+
+  it("write tools include the warning prefix in description", () => {
+    const server = createMockMcpServer();
+    registerAllTools(server as never);
+
+    for (const tool of server._registeredTools) {
+      const isWrite =
+        tool.annotations?.readOnlyHint !== true;
+      if (isWrite) {
+        expect(tool.description).toContain("⚠️");
+      }
+    }
+  });
+
   it("includes expected core tools", () => {
     const server = createMockMcpServer();
     registerAllTools(server as never);
@@ -52,33 +83,45 @@ describe("registerAllTools", () => {
     const names = server._registeredTools.map((t) => t.name);
 
     // Core account/campaign tools
-    expect(names).toContain("meta_ads_get_ad_accounts");
-    expect(names).toContain("meta_ads_get_campaigns");
-    expect(names).toContain("meta_ads_create_campaign");
-    expect(names).toContain("meta_ads_get_insights");
-    expect(names).toContain("meta_ads_get_creative_details");
-    expect(names).toContain("meta_ads_clone_adset_bundle");
+    expect(names).toContain("ads_get_ad_accounts");
+    expect(names).toContain("ads_get_campaigns");
+    expect(names).toContain("ads_create_campaign");
+    expect(names).toContain("ads_get_insights");
+    expect(names).toContain("ads_get_creative_details");
+    expect(names).toContain("ads_clone_ad_set_bundle");
 
     // Token management tools
-    expect(names).toContain("meta_ads_list_tokens");
-    expect(names).toContain("meta_ads_set_active_token");
-    expect(names).toContain("meta_ads_register_token");
-    expect(names).toContain("meta_ads_delete_token");
+    expect(names).toContain("ads_list_tokens");
+    expect(names).toContain("ads_set_active_token");
+    expect(names).toContain("ads_register_token");
+    expect(names).toContain("ads_delete_token");
 
     // Instagram tools
-    expect(names).toContain("meta_ads_get_instagram_account");
-    expect(names).toContain("meta_ads_get_instagram_media");
+    expect(names).toContain("ads_get_instagram_account");
+    expect(names).toContain("ads_get_instagram_media");
 
     // Extended feature tools
-    expect(names).toContain("meta_ads_get_lead_forms");
-    expect(names).toContain("meta_ads_get_custom_audiences");
-    expect(names).toContain("meta_ads_get_ad_preview");
-    expect(names).toContain("meta_ads_get_pixels");
-    expect(names).toContain("meta_ads_get_ad_comments");
-    expect(names).toContain("meta_ads_get_ad_rules");
-    expect(names).toContain("meta_ads_get_ad_studies");
-    expect(names).toContain("meta_ads_create_async_report");
-    expect(names).toContain("meta_ads_get_billing_info");
+    expect(names).toContain("ads_get_lead_forms");
+    expect(names).toContain("ads_get_custom_audiences");
+    expect(names).toContain("ads_get_ad_preview");
+    expect(names).toContain("ads_get_pixels");
+    expect(names).toContain("ads_get_ad_comments");
+    expect(names).toContain("ads_get_ad_rules");
+    expect(names).toContain("ads_get_ad_studies");
+    expect(names).toContain("ads_create_async_report");
+    expect(names).toContain("ads_get_billing_info");
+
+    // Renamed in v3
+    expect(names).toContain("ads_get_pages_for_business");
+    expect(names).toContain("ads_create_ad_set");
+    expect(names).toContain("ads_update_ad_set");
+    expect(names).toContain("ads_delete_ad_set");
+    expect(names).toContain("ads_get_ad_sets");
+    expect(names).toContain("ads_get_ad_set_details");
+
+    // Removed in v3
+    expect(names).not.toContain("ads_get_account_insights");
+    expect(names).not.toContain("meta_ads_get_account_insights");
   });
 
   it("registers correct tool count per module", () => {
@@ -87,8 +130,7 @@ describe("registerAllTools", () => {
 
     const names = server._registeredTools.map((t) => t.name);
 
-    // Count tools by prefix pattern for each module
-    const accountTools = names.filter((n) => n.includes("account") || n === "meta_ads_get_pages");
+    const accountTools = names.filter((n) => n.includes("account") || n === "ads_get_pages_for_business");
     expect(accountTools.length).toBeGreaterThanOrEqual(3);
 
     const campaignTools = names.filter((n) => n.includes("campaign"));

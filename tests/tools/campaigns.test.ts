@@ -15,7 +15,7 @@ describe("registerCampaignTools", () => {
   it("registers exactly 5 tools", () => {
     const server = createMockMcpServer();
     registerCampaignTools(server as never);
-    expect(server.tool).toHaveBeenCalledTimes(5);
+    expect(server.registerTool).toHaveBeenCalledTimes(5);
   });
 
   it("registers tools with correct names", () => {
@@ -23,15 +23,15 @@ describe("registerCampaignTools", () => {
     registerCampaignTools(server as never);
     const names = server._registeredTools.map((t) => t.name);
     expect(names).toEqual([
-      "meta_ads_get_campaigns",
-      "meta_ads_get_campaign_details",
-      "meta_ads_create_campaign",
-      "meta_ads_update_campaign",
-      "meta_ads_delete_campaign",
+      "ads_get_campaigns",
+      "ads_get_campaign_details",
+      "ads_create_campaign",
+      "ads_update_campaign",
+      "ads_delete_campaign",
     ]);
   });
 
-  describe("meta_ads_get_campaigns handler", () => {
+  describe("ads_get_campaigns handler", () => {
     it("returns campaign list", async () => {
       const server = createMockMcpServer();
       registerCampaignTools(server as never);
@@ -85,7 +85,7 @@ describe("registerCampaignTools", () => {
     });
   });
 
-  describe("meta_ads_create_campaign handler", () => {
+  describe("ads_create_campaign handler", () => {
     it("creates a campaign and returns ID", async () => {
       const server = createMockMcpServer();
       registerCampaignTools(server as never);
@@ -110,7 +110,7 @@ describe("registerCampaignTools", () => {
     });
   });
 
-  describe("meta_ads_update_campaign handler", () => {
+  describe("ads_update_campaign handler", () => {
     it("updates a campaign", async () => {
       const server = createMockMcpServer();
       registerCampaignTools(server as never);
@@ -131,7 +131,7 @@ describe("registerCampaignTools", () => {
     });
   });
 
-  describe("meta_ads_delete_campaign handler", () => {
+  describe("ads_delete_campaign handler", () => {
     it("soft-deletes a campaign", async () => {
       const server = createMockMcpServer();
       registerCampaignTools(server as never);

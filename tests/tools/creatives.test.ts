@@ -20,7 +20,7 @@ describe("registerCreativeTools", () => {
   it("registers exactly 9 tools", () => {
     const server = createMockMcpServer();
     registerCreativeTools(server as never);
-    expect(server.tool).toHaveBeenCalledTimes(9);
+    expect(server.registerTool).toHaveBeenCalledTimes(9);
   });
 
   it("registers tools with expected names", () => {
@@ -29,19 +29,19 @@ describe("registerCreativeTools", () => {
 
     const names = server._registeredTools.map((t) => t.name);
     expect(names).toEqual([
-      "meta_ads_get_ad_creatives",
-      "meta_ads_get_creative_details",
-      "meta_ads_create_ad_creative",
-      "meta_ads_update_ad_creative",
-      "meta_ads_upload_ad_image",
-      "meta_ads_get_ad_images",
-      "meta_ads_get_ad_videos",
-      "meta_ads_get_video_details",
-      "meta_ads_upload_ad_video",
+      "ads_get_ad_creatives",
+      "ads_get_creative_details",
+      "ads_create_ad_creative",
+      "ads_update_ad_creative",
+      "ads_upload_ad_image",
+      "ads_get_ad_images",
+      "ads_get_ad_videos",
+      "ads_get_video_details",
+      "ads_upload_ad_video",
     ]);
   });
 
-  describe("meta_ads_get_creative_details handler", () => {
+  describe("ads_get_creative_details handler", () => {
     it("uses default fields and returns a readable summary", async () => {
       const server = createMockMcpServer();
       registerCreativeTools(server as never);
@@ -125,7 +125,7 @@ describe("registerCreativeTools", () => {
     });
   });
 
-  describe("meta_ads_create_ad_creative handler", () => {
+  describe("ads_create_ad_creative handler", () => {
     it("fails locally when a scratch video creative is missing thumbnail data", async () => {
       const server = createMockMcpServer();
       registerCreativeTools(server as never);
