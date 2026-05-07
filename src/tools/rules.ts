@@ -5,6 +5,7 @@ import { normalizeAccountId, truncateResponse, validateMetaId } from "../utils/f
 import { buildFieldsParam } from "../utils/validation.js";
 import { RULE_DEFAULT_FIELDS } from "../meta/types/rule.js";
 import type { AdRule, AdRuleHistory, MetaApiResponse } from "../meta/types/index.js";
+import { READ, CREATE, UPDATE, DELETE, WRITE_WARNING } from "./_register.js";
 
 const executionTypeEnum = z.enum([
   "PAUSE", "UNPAUSE", "CHANGE_BUDGET", "CHANGE_BID",
@@ -17,13 +18,17 @@ const scheduleTypeEnum = z.enum([
 
 export function registerRuleTools(server: McpServer): void {
   // ─── Get Ad Rules ─────────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_ad_rules",
-    "List automated rules for an ad account. Shows rules that auto-pause, adjust budgets, or send notifications based on performance.",
+  server.registerTool(
+    "ads_get_ad_rules",
     {
-      account_id: z.string().describe("Ad account ID"),
-      limit: z.number().min(1).max(100).default(25),
-      fields: z.array(z.string()).optional(),
+      description:
+        "List automated rules for an ad account. Shows rules that auto-pause, adjust budgets, or send notifications based on performance.",
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        limit: z.number().min(1).max(100).default(25),
+        fields: z.array(z.string()).optional(),
+      },
+      annotations: { ...READ },
     },
     async ({ account_id, limit, fields }) => {
       const id = normalizeAccountId(account_id);
@@ -55,47 +60,50 @@ export function registerRuleTools(server: McpServer): void {
   );
 
   // ─── Create Ad Rule ───────────────────────────────────────────
-  server.tool(
-    "meta_ads_create_ad_rule",
-    "Create an automated rule. Examples: pause adsets when CPL > $20, notify when CTR < 1%, increase budget when ROAS > 3x.",
+  server.registerTool(
+    "ads_create_ad_rule",
     {
-      account_id: z.string().describe("Ad account ID"),
-      name: z.string().min(1).describe("Rule name"),
-      evaluation_spec: z
-        .object({
-          evaluation_type: z.enum(["TRIGGER", "SCHEDULE"]).describe("TRIGGER for real-time, SCHEDULE for periodic"),
-          filters: z
-            .array(
-              z.object({
-                field: z.string().describe("Metric field (e.g., cost_per_action_type, ctr, impressions)"),
-                value: z.union([z.string(), z.number()]).describe("Threshold value"),
-                operator: z.enum(["GREATER_THAN", "LESS_THAN", "EQUAL", "NOT_EQUAL", "IN_RANGE", "NOT_IN_RANGE"])
-                  .describe("Comparison operator"),
-              }),
-            )
-            .describe("Conditions that trigger the rule"),
-        })
-        .describe("When to evaluate the rule"),
-      execution_spec: z
-        .object({
-          execution_type: executionTypeEnum.describe("Action to take when conditions are met"),
-          execution_options: z
-            .array(
-              z.object({
-                field: z.string(),
-                value: z.union([z.string(), z.number()]),
-                operator: z.enum(["EQUAL", "INCREASE_BY", "DECREASE_BY"]).optional(),
-              }),
-            )
-            .optional()
-            .describe("Options for CHANGE_BUDGET/CHANGE_BID execution types"),
-        })
-        .describe("What to do when triggered"),
-      schedule_spec: z
-        .object({
-          schedule_type: scheduleTypeEnum.describe("How often to evaluate"),
-        })
-        .optional(),
+      description: `${WRITE_WARNING}Create an automated rule. Examples: pause adsets when CPL > $20, notify when CTR < 1%, increase budget when ROAS > 3x.`,
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        name: z.string().min(1).describe("Rule name"),
+        evaluation_spec: z
+          .object({
+            evaluation_type: z.enum(["TRIGGER", "SCHEDULE"]).describe("TRIGGER for real-time, SCHEDULE for periodic"),
+            filters: z
+              .array(
+                z.object({
+                  field: z.string().describe("Metric field (e.g., cost_per_action_type, ctr, impressions)"),
+                  value: z.union([z.string(), z.number()]).describe("Threshold value"),
+                  operator: z.enum(["GREATER_THAN", "LESS_THAN", "EQUAL", "NOT_EQUAL", "IN_RANGE", "NOT_IN_RANGE"])
+                    .describe("Comparison operator"),
+                }),
+              )
+              .describe("Conditions that trigger the rule"),
+          })
+          .describe("When to evaluate the rule"),
+        execution_spec: z
+          .object({
+            execution_type: executionTypeEnum.describe("Action to take when conditions are met"),
+            execution_options: z
+              .array(
+                z.object({
+                  field: z.string(),
+                  value: z.union([z.string(), z.number()]),
+                  operator: z.enum(["EQUAL", "INCREASE_BY", "DECREASE_BY"]).optional(),
+                }),
+              )
+              .optional()
+              .describe("Options for CHANGE_BUDGET/CHANGE_BID execution types"),
+          })
+          .describe("What to do when triggered"),
+        schedule_spec: z
+          .object({
+            schedule_type: scheduleTypeEnum.describe("How often to evaluate"),
+          })
+          .optional(),
+      },
+      annotations: { ...CREATE },
     },
     async ({ account_id, name, evaluation_spec, execution_spec, schedule_spec }) => {
       const id = normalizeAccountId(account_id);
@@ -127,13 +135,17 @@ export function registerRuleTools(server: McpServer): void {
   );
 
   // ─── Get Rule Details ─────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_rule_details",
-    "Get detailed information about an automated rule and its execution history.",
+  server.registerTool(
+    "ads_get_rule_details",
     {
-      rule_id: z.string().describe("Rule ID"),
-      fields: z.array(z.string()).optional(),
-      include_history: z.boolean().default(false).describe("Include rule execution history"),
+      description:
+        "Get detailed information about an automated rule and its execution history.",
+      inputSchema: {
+        rule_id: z.string().describe("Rule ID"),
+        fields: z.array(z.string()).optional(),
+        include_history: z.boolean().default(false).describe("Include rule execution history"),
+      },
+      annotations: { ...READ },
     },
     async ({ rule_id, fields, include_history }) => {
       const id = validateMetaId(rule_id, "rule");
@@ -173,39 +185,42 @@ export function registerRuleTools(server: McpServer): void {
   );
 
   // ─── Update Ad Rule ───────────────────────────────────────────
-  server.tool(
-    "meta_ads_update_ad_rule",
-    "Update an existing automated rule's name, status, or specs.",
+  server.registerTool(
+    "ads_update_ad_rule",
     {
-      rule_id: z.string().describe("Rule ID to update"),
-      name: z.string().optional().describe("New name"),
-      status: z.enum(["ENABLED", "DISABLED"]).optional().describe("Enable or disable the rule"),
-      evaluation_spec: z
-        .object({
-          evaluation_type: z.enum(["TRIGGER", "SCHEDULE"]),
-          filters: z.array(
-            z.object({
-              field: z.string(),
-              value: z.union([z.string(), z.number()]),
-              operator: z.string(),
-            }),
-          ),
-        })
-        .optional(),
-      execution_spec: z
-        .object({
-          execution_type: executionTypeEnum,
-          execution_options: z
-            .array(
+      description: `${WRITE_WARNING}Update an existing automated rule's name, status, or specs.`,
+      inputSchema: {
+        rule_id: z.string().describe("Rule ID to update"),
+        name: z.string().optional().describe("New name"),
+        status: z.enum(["ENABLED", "DISABLED"]).optional().describe("Enable or disable the rule"),
+        evaluation_spec: z
+          .object({
+            evaluation_type: z.enum(["TRIGGER", "SCHEDULE"]),
+            filters: z.array(
               z.object({
                 field: z.string(),
                 value: z.union([z.string(), z.number()]),
-                operator: z.string().optional(),
+                operator: z.string(),
               }),
-            )
-            .optional(),
-        })
-        .optional(),
+            ),
+          })
+          .optional(),
+        execution_spec: z
+          .object({
+            execution_type: executionTypeEnum,
+            execution_options: z
+              .array(
+                z.object({
+                  field: z.string(),
+                  value: z.union([z.string(), z.number()]),
+                  operator: z.string().optional(),
+                }),
+              )
+              .optional(),
+          })
+          .optional(),
+      },
+      annotations: { ...UPDATE },
     },
     async ({ rule_id, name, status, evaluation_spec, execution_spec }) => {
       const id = validateMetaId(rule_id, "rule");
@@ -226,11 +241,14 @@ export function registerRuleTools(server: McpServer): void {
   );
 
   // ─── Delete Ad Rule ───────────────────────────────────────────
-  server.tool(
-    "meta_ads_delete_ad_rule",
-    "Delete an automated rule.",
+  server.registerTool(
+    "ads_delete_ad_rule",
     {
-      rule_id: z.string().describe("Rule ID to delete"),
+      description: `${WRITE_WARNING}Delete an automated rule.`,
+      inputSchema: {
+        rule_id: z.string().describe("Rule ID to delete"),
+      },
+      annotations: { ...DELETE },
     },
     async ({ rule_id }) => {
       const id = validateMetaId(rule_id, "rule");

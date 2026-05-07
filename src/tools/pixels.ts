@@ -12,15 +12,19 @@ import type {
   CustomConversion,
   MetaApiResponse,
 } from "../meta/types/index.js";
+import { READ, CREATE, WRITE_WARNING } from "./_register.js";
 
 export function registerPixelTools(server: McpServer): void {
   // ─── Get Pixels ───────────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_pixels",
-    "List pixels for an ad account. Returns pixel IDs, names, and last fire times.",
+  server.registerTool(
+    "ads_get_pixels",
     {
-      account_id: z.string().describe("Ad account ID"),
-      fields: z.array(z.string()).optional(),
+      description: "List pixels for an ad account. Returns pixel IDs, names, and last fire times.",
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        fields: z.array(z.string()).optional(),
+      },
+      annotations: { ...READ },
     },
     async ({ account_id, fields }) => {
       const id = normalizeAccountId(account_id);
@@ -52,12 +56,16 @@ export function registerPixelTools(server: McpServer): void {
   );
 
   // ─── Get Pixel Details ────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_pixel_details",
-    "Get detailed information about a specific pixel including its installation code snippet.",
+  server.registerTool(
+    "ads_get_pixel_details",
     {
-      pixel_id: z.string().describe("Pixel ID"),
-      fields: z.array(z.string()).optional(),
+      description:
+        "Get detailed information about a specific pixel including its installation code snippet.",
+      inputSchema: {
+        pixel_id: z.string().describe("Pixel ID"),
+        fields: z.array(z.string()).optional(),
+      },
+      annotations: { ...READ },
     },
     async ({ pixel_id, fields }) => {
       const id = validateMetaId(pixel_id, "pixel");
@@ -88,17 +96,21 @@ export function registerPixelTools(server: McpServer): void {
   );
 
   // ─── Get Pixel Events / Stats ─────────────────────────────────
-  server.tool(
-    "meta_ads_get_pixel_events",
-    "Get event statistics for a pixel. Useful for debugging tracking issues — shows which events are being received and their counts.",
+  server.registerTool(
+    "ads_get_pixel_events",
     {
-      pixel_id: z.string().describe("Pixel ID"),
-      aggregation: z
-        .enum(["event", "device", "url", "custom_data_field"])
-        .default("event")
-        .describe("How to aggregate stats"),
-      start_time: z.string().optional().describe("Start time (ISO 8601 or Unix timestamp)"),
-      end_time: z.string().optional().describe("End time (ISO 8601 or Unix timestamp)"),
+      description:
+        "Get event statistics for a pixel. Useful for debugging tracking issues — shows which events are being received and their counts.",
+      inputSchema: {
+        pixel_id: z.string().describe("Pixel ID"),
+        aggregation: z
+          .enum(["event", "device", "url", "custom_data_field"])
+          .default("event")
+          .describe("How to aggregate stats"),
+        start_time: z.string().optional().describe("Start time (ISO 8601 or Unix timestamp)"),
+        end_time: z.string().optional().describe("End time (ISO 8601 or Unix timestamp)"),
+      },
+      annotations: { ...READ },
     },
     async ({ pixel_id, aggregation, start_time, end_time }) => {
       const id = validateMetaId(pixel_id, "pixel");
@@ -137,13 +149,16 @@ export function registerPixelTools(server: McpServer): void {
   );
 
   // ─── Get Custom Conversions ───────────────────────────────────
-  server.tool(
-    "meta_ads_get_custom_conversions",
-    "List custom conversions for an ad account.",
+  server.registerTool(
+    "ads_get_custom_conversions",
     {
-      account_id: z.string().describe("Ad account ID"),
-      limit: z.number().min(1).max(100).default(25),
-      fields: z.array(z.string()).optional(),
+      description: "List custom conversions for an ad account.",
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        limit: z.number().min(1).max(100).default(25),
+        fields: z.array(z.string()).optional(),
+      },
+      annotations: { ...READ },
     },
     async ({ account_id, limit, fields }) => {
       const id = normalizeAccountId(account_id);
@@ -175,27 +190,30 @@ export function registerPixelTools(server: McpServer): void {
   );
 
   // ─── Create Custom Conversion ─────────────────────────────────
-  server.tool(
-    "meta_ads_create_custom_conversion",
-    "Create a custom conversion for an ad account. Define rules based on URL or pixel events.",
+  server.registerTool(
+    "ads_create_custom_conversion",
     {
-      account_id: z.string().describe("Ad account ID"),
-      name: z.string().min(1).describe("Custom conversion name"),
-      description: z.string().optional(),
-      pixel_id: z.string().describe("Pixel ID to associate with"),
-      event_source_type: z
-        .enum(["WEB", "APP", "MOBILE"])
-        .default("WEB")
-        .describe("Event source type"),
-      custom_event_type: z
-        .enum([
-          "ADD_PAYMENT_INFO", "ADD_TO_CART", "ADD_TO_WISHLIST", "COMPLETE_REGISTRATION",
-          "CONTENT_VIEW", "INITIATED_CHECKOUT", "LEAD", "PURCHASE", "SEARCH",
-          "OTHER",
-        ])
-        .describe("Standard event type to track"),
-      rule: z.string().describe("Conversion rule (JSON string, e.g., URL contains, event parameters)"),
-      default_conversion_value: z.number().optional().describe("Default monetary value"),
+      description: `${WRITE_WARNING}Create a custom conversion for an ad account. Define rules based on URL or pixel events.`,
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        name: z.string().min(1).describe("Custom conversion name"),
+        description: z.string().optional(),
+        pixel_id: z.string().describe("Pixel ID to associate with"),
+        event_source_type: z
+          .enum(["WEB", "APP", "MOBILE"])
+          .default("WEB")
+          .describe("Event source type"),
+        custom_event_type: z
+          .enum([
+            "ADD_PAYMENT_INFO", "ADD_TO_CART", "ADD_TO_WISHLIST", "COMPLETE_REGISTRATION",
+            "CONTENT_VIEW", "INITIATED_CHECKOUT", "LEAD", "PURCHASE", "SEARCH",
+            "OTHER",
+          ])
+          .describe("Standard event type to track"),
+        rule: z.string().describe("Conversion rule (JSON string, e.g., URL contains, event parameters)"),
+        default_conversion_value: z.number().optional().describe("Default monetary value"),
+      },
+      annotations: { ...CREATE },
     },
     async ({ account_id, name, description, pixel_id, event_source_type, custom_event_type, rule, default_conversion_value }) => {
       const accountPath = normalizeAccountId(account_id);

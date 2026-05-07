@@ -2,6 +2,7 @@
  * Shared test helpers and mocks.
  */
 import { vi } from "vitest";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 
 /**
  * Set a META_ACCESS_TOKEN env var so getAccessToken() doesn't throw.
@@ -35,28 +36,57 @@ export function mockFetchResponse(
   } as unknown as Response;
 }
 
+interface RegisteredTool {
+  name: string;
+  description: string;
+  schema: unknown;
+  annotations?: ToolAnnotations;
+  handler: (...args: unknown[]) => Promise<unknown>;
+}
+
 /**
  * Create a mock McpServer that records tool registrations.
+ *
+ * Supports both the legacy `server.tool(name, description, schema, handler)` API
+ * and the modern `server.registerTool(name, config, handler)` API used in v3.
  */
 export function createMockMcpServer() {
-  const tools: Array<{
-    name: string;
-    description: string;
-    schema: unknown;
-    handler: (...args: unknown[]) => Promise<unknown>;
-  }> = [];
+  const tools: RegisteredTool[] = [];
+
+  const registerTool = vi.fn(
+    (
+      name: string,
+      config: {
+        description?: string;
+        inputSchema?: unknown;
+        annotations?: ToolAnnotations;
+      },
+      handler: (...args: unknown[]) => Promise<unknown>,
+    ) => {
+      tools.push({
+        name,
+        description: config.description ?? "",
+        schema: config.inputSchema,
+        annotations: config.annotations,
+        handler,
+      });
+    },
+  );
+
+  const tool = vi.fn(
+    (
+      name: string,
+      description: string,
+      schema: unknown,
+      handler: (...args: unknown[]) => Promise<unknown>,
+    ) => {
+      tools.push({ name, description, schema, handler });
+    },
+  );
 
   const server = {
-    tool: vi.fn(
-      (
-        name: string,
-        description: string,
-        schema: unknown,
-        handler: (...args: unknown[]) => Promise<unknown>,
-      ) => {
-        tools.push({ name, description, schema, handler });
-      },
-    ),
+    tool,
+    registerTool,
     _registeredTools: tools,
   };
 

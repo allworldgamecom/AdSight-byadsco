@@ -13,27 +13,32 @@ import type {
   Page,
   MetaApiResponse,
 } from "../meta/types/index.js";
+import { READ } from "./_register.js";
 
 export function registerAccountTools(server: McpServer): void {
   // ─── Get Ad Accounts ─────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_ad_accounts",
-    "Get all ad accounts accessible by the authenticated user. Returns account names, IDs, status, currency, and spend information.",
+  server.registerTool(
+    "ads_get_ad_accounts",
     {
-      user_id: z
-        .string()
-        .default("me")
-        .describe("User ID or 'me' for the authenticated user"),
-      limit: z
-        .number()
-        .min(1)
-        .max(500)
-        .default(100)
-        .describe("Maximum number of accounts to return"),
-      fields: z
-        .array(z.string())
-        .optional()
-        .describe("Fields to include (defaults to standard set)"),
+      description:
+        "Get all ad accounts accessible by the authenticated user. Returns account names, IDs, status, currency, and spend information.",
+      inputSchema: {
+        user_id: z
+          .string()
+          .default("me")
+          .describe("User ID or 'me' for the authenticated user"),
+        limit: z
+          .number()
+          .min(1)
+          .max(500)
+          .default(100)
+          .describe("Maximum number of accounts to return"),
+        fields: z
+          .array(z.string())
+          .optional()
+          .describe("Fields to include (defaults to standard set)"),
+      },
+      annotations: { ...READ },
     },
     async ({ user_id, limit, fields }) => {
       const userPath = user_id === "me" ? "me" : validateMetaId(user_id, "user");
@@ -68,13 +73,17 @@ export function registerAccountTools(server: McpServer): void {
   );
 
   // ─── Get Account Info ────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_account_info",
-    "Get detailed information about a specific ad account including spend, balance, capabilities, and business details.",
+  server.registerTool(
+    "ads_get_account_info",
     {
-      account_id: z
-        .string()
-        .describe("Ad account ID (with or without 'act_' prefix)"),
+      description:
+        "Get detailed information about a specific ad account including spend, balance, capabilities, and business details.",
+      inputSchema: {
+        account_id: z
+          .string()
+          .describe("Ad account ID (with or without 'act_' prefix)"),
+      },
+      annotations: { ...READ },
     },
     async ({ account_id }) => {
       const id = normalizeAccountId(account_id);
@@ -96,17 +105,21 @@ export function registerAccountTools(server: McpServer): void {
     },
   );
 
-  // ─── Get Pages ───────────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_pages",
-    "Get Facebook Pages associated with an ad account or the authenticated user. Pages are required for creating ad creatives.",
+  // ─── Get Pages For Business ──────────────────────────────────
+  server.registerTool(
+    "ads_get_pages_for_business",
     {
-      account_id: z
-        .string()
-        .optional()
-        .describe(
-          "Ad account ID to get associated pages. Omit to get user's own pages.",
-        ),
+      description:
+        "Get Facebook Pages associated with an ad account or the authenticated user. Pages are required for creating ad creatives.",
+      inputSchema: {
+        account_id: z
+          .string()
+          .optional()
+          .describe(
+            "Ad account ID to get associated pages. Omit to get user's own pages.",
+          ),
+      },
+      annotations: { ...READ },
     },
     async ({ account_id }) => {
       const fieldsParam = [...PAGE_DEFAULT_FIELDS].join(",");

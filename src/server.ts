@@ -10,7 +10,7 @@ import { registerAllTools } from "./tools/index.js";
 export function createServer(): McpServer {
   const server = new McpServer({
     name: "meta-ads-mcp",
-    version: "1.0.0",
+    version: "3.0.0",
   });
 
   registerAllTools(server);

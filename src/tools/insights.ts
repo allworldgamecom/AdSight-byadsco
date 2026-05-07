@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
-import { normalizeAccountId, truncateResponse, validateMetaId } from "../utils/format.js";
+import { truncateResponse, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { INSIGHTS_DEFAULT_FIELDS } from "../meta/types/insights.js";
 import type { InsightsResult, MetaApiResponse } from "../meta/types/index.js";
@@ -9,6 +9,8 @@ import {
   enforceInsightsGuardrails,
   applyAttributionDefault,
 } from "./insights-guardrails.js";
+import { buildSingleInsightSummary } from "./insights-helpers.js";
+import { READ } from "./_register.js";
 
 const datePresetEnum = z.enum([
   "today", "yesterday", "this_month", "last_month", "this_quarter",
@@ -43,39 +45,45 @@ const filteringEntrySchema = z.object({
 
 export function registerInsightsTools(server: McpServer): void {
   // ─── Get Insights ────────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_insights",
-    "Get performance insights (metrics) for a campaign, ad set, ad, or account. Supports breakdowns, date ranges, attribution windows, and time series. Unsafe combos (account-level + high-cardinality breakdowns, wide date ranges + breakdowns in sync) are rejected early — use meta_ads_run_report_and_wait for those. Recommended: pass filtering=[{field:\"ad.impressions\",operator:\"GREATER_THAN\",value:0}] to skip objects without data.",
+  // Power tool — full control over breakdowns, attribution, time series.
+  // For semantic, agent-friendly views see ads_insights_* tools.
+  server.registerTool(
+    "ads_get_insights",
     {
-      object_id: z.string().describe("Campaign, Ad Set, Ad, or Account ID (use act_XXX for accounts)"),
-      level: levelEnum.optional().describe("Aggregation level — useful when querying account/campaign to break down to ad set or ad level"),
-      time_range: z
-        .object({
-          since: z.string().describe("Start date YYYY-MM-DD"),
-          until: z.string().describe("End date YYYY-MM-DD"),
-        })
-        .optional()
-        .describe("Custom date range (prefer date_preset when one matches — it's more efficient server-side)"),
-      date_preset: datePresetEnum.optional().describe("Predefined date range (preferred over time_range for stability and performance)"),
-      breakdowns: z.array(breakdownEnum).optional().describe("Breakdown dimensions. Avoid product_id / asset-level on account-wide queries."),
-      fields: z.array(z.string()).optional().describe("Metrics to retrieve (defaults to standard set)"),
-      action_attribution_windows: z.array(attributionWindowEnum).optional(),
-      use_unified_attribution_setting: z
-        .boolean()
-        .default(true)
-        .describe("Default true: match Ads Manager behaviour (Meta change effective 2025-06-10). Set false only for bespoke attribution."),
-      filtering: z
-        .array(filteringEntrySchema)
-        .optional()
-        .describe("Server-side filter, e.g. [{field:\"ad.impressions\",operator:\"GREATER_THAN\",value:0}] to skip empty objects."),
-      time_increment: z
-        .union([
-          z.number().min(1).max(90),
-          z.enum(["monthly", "all_days"]),
-        ])
-        .optional()
-        .describe("Time increment for series data — number of days, 'monthly', or 'all_days'"),
-      limit: z.number().min(1).max(1000).default(100),
+      description:
+        "Get performance insights (metrics) for a campaign, ad set, ad, or account. Supports breakdowns, date ranges, attribution windows, and time series. Unsafe combos (account-level + high-cardinality breakdowns, wide date ranges + breakdowns in sync) are rejected early — use ads_run_report_and_wait for those. Recommended: pass filtering=[{field:\"ad.impressions\",operator:\"GREATER_THAN\",value:0}] to skip objects without data.",
+      inputSchema: {
+        object_id: z.string().describe("Campaign, Ad Set, Ad, or Account ID (use act_XXX for accounts)"),
+        level: levelEnum.optional().describe("Aggregation level — useful when querying account/campaign to break down to ad set or ad level"),
+        time_range: z
+          .object({
+            since: z.string().describe("Start date YYYY-MM-DD"),
+            until: z.string().describe("End date YYYY-MM-DD"),
+          })
+          .optional()
+          .describe("Custom date range (prefer date_preset when one matches — it's more efficient server-side)"),
+        date_preset: datePresetEnum.optional().describe("Predefined date range (preferred over time_range for stability and performance)"),
+        breakdowns: z.array(breakdownEnum).optional().describe("Breakdown dimensions. Avoid product_id / asset-level on account-wide queries."),
+        fields: z.array(z.string()).optional().describe("Metrics to retrieve (defaults to standard set)"),
+        action_attribution_windows: z.array(attributionWindowEnum).optional(),
+        use_unified_attribution_setting: z
+          .boolean()
+          .default(true)
+          .describe("Default true: match Ads Manager behaviour (Meta change effective 2025-06-10). Set false only for bespoke attribution."),
+        filtering: z
+          .array(filteringEntrySchema)
+          .optional()
+          .describe("Server-side filter, e.g. [{field:\"ad.impressions\",operator:\"GREATER_THAN\",value:0}] to skip empty objects."),
+        time_increment: z
+          .union([
+            z.number().min(1).max(90),
+            z.enum(["monthly", "all_days"]),
+          ])
+          .optional()
+          .describe("Time increment for series data — number of days, 'monthly', or 'all_days'"),
+        limit: z.number().min(1).max(1000).default(100),
+      },
+      annotations: { ...READ },
     },
     async ({
       object_id, level, time_range, date_preset, breakdowns,
@@ -142,72 +150,6 @@ export function registerInsightsTools(server: McpServer): void {
     },
   );
 
-  // ─── Get Account Insights ────────────────────────────────────
-  server.tool(
-    "meta_ads_get_account_insights",
-    "Quick account performance summary. Returns key metrics for the specified date range at account level.",
-    {
-      account_id: z.string().describe("Ad account ID"),
-      date_preset: datePresetEnum.default("last_30d"),
-      fields: z.array(z.string()).optional(),
-      use_unified_attribution_setting: z.boolean().default(true),
-    },
-    async ({ account_id, date_preset, fields, use_unified_attribution_setting }) => {
-      const id = normalizeAccountId(account_id);
-      const fieldsParam = buildFieldsParam(fields, [...INSIGHTS_DEFAULT_FIELDS]);
-
-      const params: Record<string, string | number | boolean> = {
-        fields: fieldsParam,
-        date_preset,
-      };
-      applyAttributionDefault(params, use_unified_attribution_setting);
-
-      const response = await metaApiClient.get<MetaApiResponse<InsightsResult>>(
-        `/${id}/insights`,
-        params,
-      );
-
-      const insights = response.data ?? [];
-
-      if (insights.length === 0) {
-        return {
-          content: [
-            { type: "text", text: `No insights data for account ${account_id} (${date_preset}).` },
-          ],
-        };
-      }
-
-      const row = insights[0];
-      const summary = buildSingleInsightSummary(row);
-
-      return {
-        content: [
-          { type: "text", text: `Account Insights (${date_preset}):\n\n${summary}` },
-          { type: "text", text: JSON.stringify(row, null, 2) },
-        ],
-      };
-    },
-  );
-}
-
-function buildSingleInsightSummary(row: InsightsResult): string {
-  const lines: string[] = [];
-  lines.push(`Period: ${row.date_start} → ${row.date_stop}`);
-  if (row.impressions) lines.push(`Impressions: ${Number(row.impressions).toLocaleString()}`);
-  if (row.reach) lines.push(`Reach: ${Number(row.reach).toLocaleString()}`);
-  if (row.clicks) lines.push(`Clicks: ${Number(row.clicks).toLocaleString()}`);
-  if (row.spend) lines.push(`Spend: $${Number(row.spend).toFixed(2)}`);
-  if (row.ctr) lines.push(`CTR: ${Number(row.ctr).toFixed(2)}%`);
-  if (row.cpc) lines.push(`CPC: $${Number(row.cpc).toFixed(2)}`);
-  if (row.cpm) lines.push(`CPM: $${Number(row.cpm).toFixed(2)}`);
-  if (row.frequency) lines.push(`Frequency: ${Number(row.frequency).toFixed(2)}`);
-
-  if (row.actions && row.actions.length > 0) {
-    lines.push("\nActions:");
-    for (const action of row.actions.slice(0, 10)) {
-      lines.push(`  • ${action.action_type}: ${action.value}`);
-    }
-  }
-
-  return lines.join("\n");
+  // Note: ads_get_account_insights from v2 has been replaced by
+  // ads_insights_advertiser_context (see insights-views.ts).
 }

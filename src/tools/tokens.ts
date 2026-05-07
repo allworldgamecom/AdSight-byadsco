@@ -10,12 +10,17 @@ import {
 } from "../store/meta-token-repo.js";
 import { validateToken as validateMetaToken } from "../auth/meta-oauth.js";
 import { logger } from "../utils/logger.js";
+import { READ, TOKEN, DELETE, WRITE_WARNING } from "./_register.js";
 
 export function registerTokenTools(server: McpServer): void {
-  server.tool(
-    "meta_ads_list_tokens",
-    "List Meta tokens registered for the current authenticated user (or the legacy global pool when running stdio / API key). Never exposes raw token values.",
-    {},
+  server.registerTool(
+    "ads_list_tokens",
+    {
+      description:
+        "List Meta tokens registered for the current authenticated user (or the legacy global pool when running stdio / API key). Never exposes raw token values.",
+      inputSchema: {},
+      annotations: { ...READ },
+    },
     async () => {
       const fbUserId = getCurrentFbUserId();
 
@@ -26,7 +31,7 @@ export function registerTokenTools(server: McpServer): void {
             content: [
               {
                 type: "text",
-                text: "No tokens registered. Connect via /authorize → 'Sign in with Meta', or register a System User token from the consent UI / meta_ads_register_token.",
+                text: "No tokens registered. Connect via /authorize → 'Sign in with Meta', or register a System User token from the consent UI / ads_register_token.",
               },
             ],
           };
@@ -55,14 +60,13 @@ export function registerTokenTools(server: McpServer): void {
         };
       }
 
-      // Legacy fallback (stdio / API key)
       const { active, available } = tokenManager.listTokens();
       if (available.length === 0) {
         return {
           content: [
             {
               type: "text",
-              text: "No tokens registered. Set META_TOKENS or META_ACCESS_TOKEN environment variable, or use meta_ads_register_token.",
+              text: "No tokens registered. Set META_TOKENS or META_ACCESS_TOKEN environment variable, or use ads_register_token.",
             },
           ],
         };
@@ -85,14 +89,17 @@ export function registerTokenTools(server: McpServer): void {
     },
   );
 
-  server.tool(
-    "meta_ads_set_active_token",
-    "Switch the active Meta API token for the current user (or the legacy global pool when running stdio / API key).",
+  server.registerTool(
+    "ads_set_active_token",
     {
-      bm_name: z
-        .string()
-        .min(1)
-        .describe("Name of the registered token / Business Manager to activate"),
+      description: `${WRITE_WARNING}Switch the active Meta API token for the current user (or the legacy global pool when running stdio / API key).`,
+      inputSchema: {
+        bm_name: z
+          .string()
+          .min(1)
+          .describe("Name of the registered token / Business Manager to activate"),
+      },
+      annotations: { ...TOKEN },
     },
     async ({ bm_name }) => {
       const fbUserId = getCurrentFbUserId();
@@ -145,20 +152,23 @@ export function registerTokenTools(server: McpServer): void {
     },
   );
 
-  server.tool(
-    "meta_ads_register_token",
-    "Register a Meta access token (typically a System User token that does not expire) for the current authenticated user. Validates the token via GET /me before registering. In stdio / API-key mode, falls back to the in-memory legacy registry.",
+  server.registerTool(
+    "ads_register_token",
     {
-      bm_name: z
-        .string()
-        .min(1)
-        .max(64)
-        .regex(/^[a-zA-Z0-9_-]+$/)
-        .describe("Friendly name (a-z, A-Z, 0-9, _, -)"),
-      access_token: z
-        .string()
-        .min(10)
-        .describe("Meta API access token to register"),
+      description: `${WRITE_WARNING}Register a Meta access token (typically a System User token that does not expire) for the current authenticated user. Validates the token via GET /me before registering. In stdio / API-key mode, falls back to the in-memory legacy registry.`,
+      inputSchema: {
+        bm_name: z
+          .string()
+          .min(1)
+          .max(64)
+          .regex(/^[a-zA-Z0-9_-]+$/)
+          .describe("Friendly name (a-z, A-Z, 0-9, _, -)"),
+        access_token: z
+          .string()
+          .min(10)
+          .describe("Meta API access token to register"),
+      },
+      annotations: { ...TOKEN },
     },
     async ({ bm_name, access_token }) => {
       logger.info(
@@ -222,11 +232,14 @@ export function registerTokenTools(server: McpServer): void {
     },
   );
 
-  server.tool(
-    "meta_ads_delete_token",
-    "Delete a Meta token registered for the current authenticated user. No-op for the legacy in-memory pool.",
+  server.registerTool(
+    "ads_delete_token",
     {
-      bm_name: z.string().min(1).max(64).describe("Name of the token to delete"),
+      description: `${WRITE_WARNING}Delete a Meta token registered for the current authenticated user. No-op for the legacy in-memory pool.`,
+      inputSchema: {
+        bm_name: z.string().min(1).max(64).describe("Name of the token to delete"),
+      },
+      annotations: { ...DELETE },
     },
     async ({ bm_name }) => {
       const fbUserId = getCurrentFbUserId();

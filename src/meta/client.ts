@@ -125,7 +125,7 @@ export class MetaApiClient {
   }
 
   /**
-   * Public snapshot for the `meta_ads_rate_status` tool.
+   * Public snapshot for the `ads_rate_status` tool.
    */
   getUsageSnapshot() {
     return {

@@ -15,28 +15,28 @@ describe("registerAccountTools", () => {
   it("registers exactly 3 tools", () => {
     const server = createMockMcpServer();
     registerAccountTools(server as never);
-    expect(server.tool).toHaveBeenCalledTimes(3);
+    expect(server.registerTool).toHaveBeenCalledTimes(3);
   });
 
-  it("registers meta_ads_get_ad_accounts tool", () => {
+  it("registers ads_get_ad_accounts tool", () => {
     const server = createMockMcpServer();
     registerAccountTools(server as never);
-    expect(server._registeredTools[0].name).toBe("meta_ads_get_ad_accounts");
+    expect(server._registeredTools[0].name).toBe("ads_get_ad_accounts");
   });
 
-  it("registers meta_ads_get_account_info tool", () => {
+  it("registers ads_get_account_info tool", () => {
     const server = createMockMcpServer();
     registerAccountTools(server as never);
-    expect(server._registeredTools[1].name).toBe("meta_ads_get_account_info");
+    expect(server._registeredTools[1].name).toBe("ads_get_account_info");
   });
 
-  it("registers meta_ads_get_pages tool", () => {
+  it("registers ads_get_pages_for_business tool", () => {
     const server = createMockMcpServer();
     registerAccountTools(server as never);
-    expect(server._registeredTools[2].name).toBe("meta_ads_get_pages");
+    expect(server._registeredTools[2].name).toBe("ads_get_pages_for_business");
   });
 
-  describe("meta_ads_get_ad_accounts handler", () => {
+  describe("ads_get_ad_accounts handler", () => {
     it("returns account data formatted correctly", async () => {
       const server = createMockMcpServer();
       registerAccountTools(server as never);
@@ -82,7 +82,7 @@ describe("registerAccountTools", () => {
     });
   });
 
-  describe("meta_ads_get_account_info handler", () => {
+  describe("ads_get_account_info handler", () => {
     it("normalizes account ID and returns details", async () => {
       const server = createMockMcpServer();
       registerAccountTools(server as never);
@@ -116,7 +116,7 @@ describe("registerAccountTools", () => {
     });
   });
 
-  describe("meta_ads_get_pages handler", () => {
+  describe("ads_get_pages_for_business handler", () => {
     it("returns pages for user when no account_id", async () => {
       const server = createMockMcpServer();
       registerAccountTools(server as never);

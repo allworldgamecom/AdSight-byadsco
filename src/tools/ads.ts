@@ -5,25 +5,29 @@ import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { AD_DEFAULT_FIELDS } from "../meta/types/ad.js";
 import type { Ad, MetaApiResponse } from "../meta/types/index.js";
+import { READ, CREATE, UPDATE, DELETE, WRITE_WARNING } from "./_register.js";
 
 const statusEnum = z.enum(["ACTIVE", "PAUSED", "DELETED", "ARCHIVED"]);
 
 export function registerAdTools(server: McpServer): void {
   // ─── Get Ads ─────────────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_ads",
-    "Get ads for an ad account. Filter by campaign, ad set, or status.",
+  server.registerTool(
+    "ads_get_ads",
     {
-      account_id: z.string().describe("Ad account ID"),
-      limit: z.number().min(1).max(100).default(25),
-      campaign_id: z.string().optional().describe("Filter by campaign ID"),
-      adset_id: z.string().optional().describe("Filter by ad set ID"),
-      status_filter: z.array(statusEnum).optional(),
+      description: "Get ads for an ad account. Filter by campaign, ad set, or status.",
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        limit: z.number().min(1).max(100).default(25),
+        campaign_id: z.string().optional().describe("Filter by campaign ID"),
+        ad_set_id: z.string().optional().describe("Filter by ad set ID"),
+        status_filter: z.array(statusEnum).optional(),
+      },
+      annotations: { ...READ },
     },
-    async ({ account_id, limit, campaign_id, adset_id, status_filter }) => {
+    async ({ account_id, limit, campaign_id, ad_set_id, status_filter }) => {
       let path: string;
-      if (adset_id) {
-        path = `/${validateMetaId(adset_id, "adset")}/ads`;
+      if (ad_set_id) {
+        path = `/${validateMetaId(ad_set_id, "adset")}/ads`;
       } else if (campaign_id) {
         path = `/${validateMetaId(campaign_id, "campaign")}/ads`;
       } else {
@@ -65,12 +69,15 @@ export function registerAdTools(server: McpServer): void {
   );
 
   // ─── Get Ad Details ──────────────────────────────────────────
-  server.tool(
-    "meta_ads_get_ad_details",
-    "Get detailed information about a specific ad.",
+  server.registerTool(
+    "ads_get_ad_details",
     {
-      ad_id: z.string().describe("Ad ID"),
-      fields: z.array(z.string()).optional(),
+      description: "Get detailed information about a specific ad.",
+      inputSchema: {
+        ad_id: z.string().describe("Ad ID"),
+        fields: z.array(z.string()).optional(),
+      },
+      annotations: { ...READ },
     },
     async ({ ad_id, fields }) => {
       const id = validateMetaId(ad_id, "ad");
@@ -90,28 +97,31 @@ export function registerAdTools(server: McpServer): void {
   );
 
   // ─── Create Ad ───────────────────────────────────────────────
-  server.tool(
-    "meta_ads_create_ad",
-    "Create a new ad within an ad set using an existing creative. Ads are created in PAUSED status by default.",
+  server.registerTool(
+    "ads_create_ad",
     {
-      account_id: z.string().describe("Ad account ID"),
-      name: z.string().min(1).describe("Ad name"),
-      adset_id: z.string().describe("Ad set ID to place this ad in"),
-      creative_id: z.string().describe("Creative ID to use for this ad"),
-      status: z.enum(["ACTIVE", "PAUSED"]).default("PAUSED"),
-      tracking_specs: z
-        .array(z.record(z.unknown()))
-        .optional()
-        .describe("Tracking specifications"),
+      description: `${WRITE_WARNING}Create a new ad within an ad set using an existing creative. Ads are created in PAUSED status by default.`,
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        name: z.string().min(1).describe("Ad name"),
+        ad_set_id: z.string().describe("Ad set ID to place this ad in"),
+        creative_id: z.string().describe("Creative ID to use for this ad"),
+        status: z.enum(["ACTIVE", "PAUSED"]).default("PAUSED"),
+        tracking_specs: z
+          .array(z.record(z.unknown()))
+          .optional()
+          .describe("Tracking specifications"),
+      },
+      annotations: { ...CREATE },
     },
-    async ({ account_id, name, adset_id, creative_id, status, tracking_specs }) => {
+    async ({ account_id, name, ad_set_id, creative_id, status, tracking_specs }) => {
       const accountPath = normalizeAccountId(account_id);
-      const adsetIdValidated = validateMetaId(adset_id, "adset");
+      const adSetIdValidated = validateMetaId(ad_set_id, "adset");
       const creativeIdValidated = validateMetaId(creative_id, "creative");
 
       const body: Record<string, string | number | boolean> = {
         name,
-        adset_id: adsetIdValidated,
+        adset_id: adSetIdValidated,
         creative: JSON.stringify({ creative_id: creativeIdValidated }),
         status,
       };
@@ -124,7 +134,7 @@ export function registerAdTools(server: McpServer): void {
         content: [
           {
             type: "text",
-            text: `Ad created successfully!\nID: ${result.id}\nName: ${name}\nAd Set: ${adsetIdValidated}\nCreative: ${creativeIdValidated}\nStatus: ${status}`,
+            text: `Ad created successfully!\nID: ${result.id}\nName: ${name}\nAd Set: ${adSetIdValidated}\nCreative: ${creativeIdValidated}\nStatus: ${status}`,
           },
         ],
       };
@@ -132,14 +142,17 @@ export function registerAdTools(server: McpServer): void {
   );
 
   // ─── Update Ad ───────────────────────────────────────────────
-  server.tool(
-    "meta_ads_update_ad",
-    "Update an existing ad's name, status, or creative.",
+  server.registerTool(
+    "ads_update_ad",
     {
-      ad_id: z.string().describe("Ad ID to update"),
-      name: z.string().optional(),
-      status: statusEnum.optional(),
-      creative_id: z.string().optional().describe("New creative ID"),
+      description: `${WRITE_WARNING}Update an existing ad's name, status, or creative.`,
+      inputSchema: {
+        ad_id: z.string().describe("Ad ID to update"),
+        name: z.string().optional(),
+        status: statusEnum.optional(),
+        creative_id: z.string().optional().describe("New creative ID"),
+      },
+      annotations: { ...UPDATE },
     },
     async ({ ad_id, name, status, creative_id }) => {
       const id = validateMetaId(ad_id, "ad");
@@ -163,11 +176,14 @@ export function registerAdTools(server: McpServer): void {
   );
 
   // ─── Delete Ad ───────────────────────────────────────────────
-  server.tool(
-    "meta_ads_delete_ad",
-    "Delete an ad (soft delete — sets status to DELETED).",
+  server.registerTool(
+    "ads_delete_ad",
     {
-      ad_id: z.string().describe("Ad ID to delete"),
+      description: `${WRITE_WARNING}Delete an ad (soft delete — sets status to DELETED).`,
+      inputSchema: {
+        ad_id: z.string().describe("Ad ID to delete"),
+      },
+      annotations: { ...DELETE },
     },
     async ({ ad_id }) => {
       const id = validateMetaId(ad_id, "ad");

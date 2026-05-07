@@ -1,6 +1,8 @@
 # Meta Ads MCP Server
 
 > **Self-hosted Model Context Protocol (MCP) server that gives Claude, ChatGPT and other AI agents secure, multi-tenant access to the Meta Marketing API for Facebook Ads and Instagram Ads.** Built for advertising agencies managing many client ad accounts from a single AI assistant — with OAuth login, encrypted-at-rest tokens, rate-limit compliance and circuit breakers baked in.
+>
+> **v3.0.0 (2026-05-06)** — vocabulary aligned with Meta's official MCP server (`mcp.facebook.com/ads`). Tool names switched from `meta_ads_*` to `ads_*`, added 14 new tools (insights views, diagnostics, help search, agency macros). Breaking change — see [CHANGELOG](CHANGELOG.md) and [docs/migration-v3.md](docs/migration-v3.md).
 
 [![License: MIT](https://img.shields.io/github/license/byadsco/meta-ads-mcp)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/byadsco/meta-ads-mcp/ci.yml?branch=main&label=CI)](https://github.com/byadsco/meta-ads-mcp/actions/workflows/ci.yml)
@@ -13,8 +15,9 @@
 
 - [What is Meta Ads MCP?](#what-is-meta-ads-mcp)
 - [Who is this for?](#who-is-this-for)
+- [Aligned with Meta's official MCP](#aligned-with-metas-official-mcp)
 - [Features](#features)
-- [Tools (80 total)](#tools-80-total)
+- [Tools (93 total)](#tools-93-total)
 - [Quick start](#quick-start)
 - [Authentication — three modes](#authentication--three-modes)
 - [Setting up Sign in with Meta](#setting-up-sign-in-with-meta)
@@ -48,9 +51,35 @@ It is **deploy-ready**. Stateless Streamable HTTP transport, Docker image, GitHu
 - **Developers** building AI-powered tools, copilots or autonomous agents on top of Meta Ads.
 - **Solo operators** who want to drive their own Meta account from Claude Desktop with zero infrastructure (`stdio` mode).
 
+## Aligned with Meta's official MCP
+
+On 2026-04-29 Meta launched a first-party remote MCP server at
+`mcp.facebook.com/ads` (the "Ads AI Connectors" umbrella) with native support
+for ChatGPT, Claude, and Perplexity. v3.0.0 of this project aligns its
+vocabulary so the same prompts and agent patterns transfer cleanly between
+both servers.
+
+| | Meta's official MCP (`mcp.facebook.com/ads`) | This project |
+|---|---|---|
+| Auth model | Per-user OAuth in your AI client | **Multi-tenant**: agency operator handles N client accounts from one server |
+| Tool surface | 29 tools (campaigns, ads, catalogs, 5 insight views, opportunity_score, dataset, errors, help) | **93 tools** including the official 29-equivalent + audiences, lookalikes, lead forms, automated rules, A/B studies, async reports, custom conversions, asset uploads, comment moderation, cross-account macros |
+| Hosting | Hosted by Meta | Self-hosted on Cloud Run / your infra; tokens encrypted at rest in Firestore |
+| Cross-account | Per-user, single Meta login | Yes — `ads_portfolio_summary` aggregates across N accounts |
+| Token control | Lives in your AI client | Server-side System User token registry per agency operator |
+| Naming | `ads_create_campaign`, `ads_update_entity`, `ads_insights_*` | **Same naming**, plus all the tools the official MCP doesn't ship |
+
+When to use which:
+
+- **Single advertiser running their own ads from Claude/ChatGPT** → Meta's
+  official MCP. Zero setup, first-party.
+- **Agency operating across many client accounts**, internal staff that should
+  not have direct Facebook login to every client, custom workflow / governance
+  needs, integration with internal stack → this project.
+
 ## Features
 
-- **80 tools** covering campaign management, creatives, targeting, audiences, reporting, comments, billing, tokens, Instagram workflows, and rate-limit observability.
+- **93 tools** covering campaign management, creatives, targeting, audiences, reporting, comments, billing, tokens, Instagram workflows, rate-limit observability, semantic insight views, diagnostics, help-center search, and agency-tier cross-account macros.
+- **Aligned vocabulary** with Meta's official MCP server so agents transfer cleanly between both.
 - **Sign in with Meta (Facebook Login)** — replaces shared PINs. Each user lands their own long-lived (60-day) Meta token.
 - **System User token registry** — for tokens that don't expire, register them per user from the consent UI.
 - **Encrypted persistence** — Meta tokens stored AES-256-GCM in Firestore; survive restarts so connections never drop.
@@ -62,30 +91,37 @@ It is **deploy-ready**. Stateless Streamable HTTP transport, Docker image, GitHu
 - **Circuit breaker** — abuse-signal (subcode 1996), temporary-block and repeated-throttle events stop all calls for the affected account, following Meta's explicit *"stop making API calls"* rule.
 - **Preventive write pacing** — Ads Management `POST`/`DELETE` are paced against the hourly BUC quota so bursts from agents never blow the limit.
 - **Insights guardrails** — dangerous parameter combinations (account-level + high-cardinality breakdowns, lifetime + breakdowns in sync, `time_range` > 37 months) are rejected *before* hitting Meta.
-- **Async reports with safe polling** — `meta_ads_run_report_and_wait` one-shot with 5 s-min / 60 s-max backoff, proper `Job Failed` / `Job Skipped` handling.
+- **Async reports with safe polling** — `ads_run_report_and_wait` one-shot with 5 s-min / 60 s-max backoff, proper `Job Failed` / `Job Skipped` handling.
 - **Retry logic** — exponential backoff on truly transient errors only (never on throttled requests).
 
-## Tools (80 total)
+## Tools (93 total)
+
+All tools use the `ads_*` naming convention, aligned with Meta's official MCP server. Read tools declare `readOnlyHint: true`; mutating tools declare `destructiveHint` / `idempotentHint` and prefix descriptions with `⚠️ Modifies live ads/account data.`
 
 | Category | Tools | Description |
 |---|---|---|
-| Accounts | 3 | List accounts, get info, get pages |
+| Accounts | 3 | `ads_get_ad_accounts`, `ads_get_account_info`, `ads_get_pages_for_business` |
 | Campaigns | 5 | CRUD + status management |
-| Ad Sets | 6 | CRUD with full targeting spec |
+| Ad Sets | 6 | CRUD + clone bundle with full targeting spec |
 | Ads | 5 | CRUD with creative assignment |
-| Creatives | 9 | List creatives, creative details, create/update creatives, image/video library and uploads |
-| Insights | 2 | Performance metrics with breakdowns |
-| Targeting | 7 | Interest / behavior / geo search, audience estimation |
+| Creatives | 9 | List, details, create/update, image/video library and uploads |
+| Generic entity helpers | 3 | `ads_get_ad_entities`, `ads_update_entity`, `ads_activate_entity` (mirror official MCP) |
+| Insights — power tool | 1 | `ads_get_insights` — full control over breakdowns, attribution, time series |
+| Insights views | 5 | `performance_trend`, `anomaly_signal`, `auction_ranking_benchmarks`, `industry_benchmark`, `advertiser_context` |
+| Targeting | 7 | Interest / behavior / demographic / geo search, audience estimation, targeting description |
 | Budget | 1 | Budget schedule management |
 | Leads | 4 | Lead forms and lead retrieval |
 | Audiences | 5 | Custom audiences and lookalikes |
 | Previews | 2 | Ad previews before launch |
-| Pixels | 5 | Pixel details, events, and conversions |
+| Pixels | 5 | Pixel details, events, custom conversions |
 | Comments | 4 | Ad comment moderation |
 | Rules | 5 | Automated rules and rule details |
 | A/B Testing | 3 | Ad study creation and inspection |
 | Reports | 4 | Async report creation, status, retrieval, and one-shot run+wait |
 | Billing | 3 | Billing info and spend limits |
+| Diagnostics | 3 | `ads_get_opportunity_score`, `ads_get_dataset_quality`, `ads_get_errors` |
+| Help search | 1 | `ads_get_help_article` — curated Meta Business Help Center search |
+| Agency macros | 2 | `ads_diagnose_underperformance`, `ads_portfolio_summary` (cross-account) |
 | Instagram | 2 | IG account and media lookup |
 | Tokens | 4 | List / set-active / register / delete |
 | Rate Status | 1 | Live view of quota usage, open circuits and write-pacer state |
@@ -96,7 +132,7 @@ Tool definitions live under [src/tools/](src/tools/), wired together in [src/too
 
 ### Prerequisites
 
-- **Node.js 20+** (Node 22 used in the Docker image).
+- **Node.js 20.10+** (the project uses Import Attributes for JSON imports). Node 22 is used in the Docker image.
 - A **Meta access token** with `ads_management` and `ads_read` permissions, *or* a Meta App configured for Facebook Login (see below).
 
 ### Install & run
@@ -243,7 +279,7 @@ Any client that speaks the [Model Context Protocol](https://modelcontextprotocol
 
 ### Updating an ad set's budget
 
-Adjusting the budget of a live ad set is a high-frequency operation for agencies — daily caps need to scale up and down based on pacing, while keeping the rest of the targeting and creative untouched. Use `meta_ads_update_adset` and only pass the fields you want to change; everything else stays as-is on Meta's side. Budget values are sent **in cents**, matching the Meta Marketing API convention (`2000` = `$20.00`). Authentication is transparent: whichever mode the deployment uses (Sign in with Meta OAuth, registered System User token, or `MCP_API_KEY` + `X-Meta-Token` headers), the active token is resolved per request and applied automatically.
+Adjusting the budget of a live ad set is a high-frequency operation for agencies — daily caps need to scale up and down based on pacing, while keeping the rest of the targeting and creative untouched. Use `ads_update_ad_set` and only pass the fields you want to change; everything else stays as-is on Meta's side. Budget values are sent **in cents**, matching the Meta Marketing API convention (`2000` = `$20.00`). Authentication is transparent: whichever mode the deployment uses (Sign in with Meta OAuth, registered System User token, or `MCP_API_KEY` + `X-Meta-Token` headers), the active token is resolved per request and applied automatically.
 
 The `tools/call` payload an MCP client sends:
 
@@ -253,9 +289,9 @@ The `tools/call` payload an MCP client sends:
   "id": 1,
   "method": "tools/call",
   "params": {
-    "name": "meta_ads_update_adset",
+    "name": "ads_update_ad_set",
     "arguments": {
-      "adset_id": "120200000000000000",
+      "ad_set_id": "120200000000000000",
       "daily_budget": 5000
     }
   }
@@ -281,19 +317,19 @@ A typical agency workflow: build a CRM-derived seed audience, expand it into a l
 
 | Tool | Source | Purpose |
 |---|---|---|
-| `meta_ads_get_custom_audiences` | [src/tools/audiences.ts](src/tools/audiences.ts) | List audiences (custom, website, lookalikes…) on an ad account. |
-| `meta_ads_get_audience_details` | [src/tools/audiences.ts](src/tools/audiences.ts) | Inspect one audience: subtype, retention, size estimate. |
-| `meta_ads_create_custom_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Create CUSTOM / WEBSITE / APP / OFFLINE_CONVERSION / ENGAGEMENT subtypes. |
-| `meta_ads_create_lookalike_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Build a lookalike (1 %–20 %) from a seed audience + country. |
-| `meta_ads_delete_custom_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Permanent delete; cannot be undone. |
-| `meta_ads_estimate_audience_size` | [src/tools/targeting.ts](src/tools/targeting.ts) | Get reach estimate before pushing the audience to an ad set. |
-| `meta_ads_update_adset` | [src/tools/adsets.ts](src/tools/adsets.ts) | **Apply** the audience by writing to `targeting.custom_audiences`. |
+| `ads_get_custom_audiences` | [src/tools/audiences.ts](src/tools/audiences.ts) | List audiences (custom, website, lookalikes…) on an ad account. |
+| `ads_get_audience_details` | [src/tools/audiences.ts](src/tools/audiences.ts) | Inspect one audience: subtype, retention, size estimate. |
+| `ads_create_custom_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Create CUSTOM / WEBSITE / APP / OFFLINE_CONVERSION / ENGAGEMENT subtypes. |
+| `ads_create_lookalike_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Build a lookalike (1 %–20 %) from a seed audience + country. |
+| `ads_delete_custom_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Permanent delete; cannot be undone. |
+| `ads_estimate_audience_size` | [src/tools/targeting.ts](src/tools/targeting.ts) | Get reach estimate before pushing the audience to an ad set. |
+| `ads_update_ad_set` | [src/tools/adsets.ts](src/tools/adsets.ts) | **Apply** the audience by writing to `targeting.custom_audiences`. |
 
 The MCP `tools/call` payload for an end-to-end run:
 
 ```json
 { "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-  "params": { "name": "meta_ads_create_custom_audience",
+  "params": { "name": "ads_create_custom_audience",
     "arguments": {
       "account_id": "act_1234567890",
       "name": "FTDs last 90d",
@@ -308,7 +344,7 @@ Returns an audience id (e.g. `23842000000000000`). Then upload hashed PII via th
 
 ```json
 { "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-  "params": { "name": "meta_ads_create_lookalike_audience",
+  "params": { "name": "ads_create_lookalike_audience",
     "arguments": {
       "account_id": "act_1234567890",
       "name": "LAL 3% US — FTDs",
@@ -322,9 +358,9 @@ Lookalike ids land in seconds but Meta needs ~24 h to compute the actual users. 
 
 ```json
 { "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-  "params": { "name": "meta_ads_update_adset",
+  "params": { "name": "ads_update_ad_set",
     "arguments": {
-      "adset_id": "120200000000000000",
+      "ad_set_id": "120200000000000000",
       "targeting": {
         "custom_audiences": [{ "id": "23842000000000099" }],
         "geo_locations": { "countries": ["US"] }
@@ -336,7 +372,7 @@ Validate reach before spend:
 
 ```json
 { "jsonrpc": "2.0", "id": 4, "method": "tools/call",
-  "params": { "name": "meta_ads_estimate_audience_size",
+  "params": { "name": "ads_estimate_audience_size",
     "arguments": {
       "account_id": "act_1234567890",
       "targeting_spec": {
@@ -351,7 +387,7 @@ Notes:
 
 - **PII must be hashed** (SHA-256 of trimmed lower-case value) before uploading to a `CUSTOM` audience with `customer_file_source=USER_PROVIDED_ONLY`. Plaintext uploads are rejected by Meta.
 - **Lookalike source minimum** is ~100 people in the seed; below that, Meta returns a "too small to model" error and `subtype=LOOKALIKE` creation fails.
-- **Removing an audience from an ad set** isn't done by deleting the audience (which kills it everywhere). Call `meta_ads_update_adset` with `targeting.custom_audiences = []` (or omit and pass a different combination).
+- **Removing an audience from an ad set** isn't done by deleting the audience (which kills it everywhere). Call `ads_update_ad_set` with `targeting.custom_audiences = []` (or omit and pass a different combination).
 - All audience reads/writes go through the same shared `metaApiClient` ([src/meta/client.ts](src/meta/client.ts)) — bucketed rate-limits, circuit-breaker, write-pacer, and per-request token resolution apply automatically.
 
 ## Architecture overview
@@ -394,14 +430,14 @@ This server is designed to keep your app and your clients' ad accounts clear of 
 ### Insights guardrails (pre-flight, before hitting Meta)
 
 - Account-level + high-cardinality breakdowns (`product_id`, `action_target_id`, asset-level) → rejected.
-- Wide date ranges (`maximum`, `>90 days`) + breakdowns on a sync call → rejected, pointing at `meta_ads_run_report_and_wait`.
+- Wide date ranges (`maximum`, `>90 days`) + breakdowns on a sync call → rejected, pointing at `ads_run_report_and_wait`.
 - `time_range` > 37 months → rejected.
 - `use_unified_attribution_setting=true` by default so responses match Ads Manager (Meta change, 2025-06-10).
 - `filtering` parameter exposed and recommended (e.g. `ad.impressions > 0`) to skip empty objects.
 
 ### Observability
 
-Call `meta_ads_rate_status` at any time to see usage, open circuits and the write-pacer state — it returns in-process state and does not call Meta. Sample JSON output (the second `text` block of the MCP response):
+Call `ads_rate_status` at any time to see usage, open circuits and the write-pacer state — it returns in-process state and does not call Meta. Sample JSON output (the second `text` block of the MCP response):
 
 ```json
 {
@@ -682,22 +718,28 @@ For local dev / single-user, yes — set `META_ACCESS_TOKEN` and use `npm run de
 OAuth is for human users with a browser (Claude Desktop, Claude Web, Cursor users). API key + `X-Meta-Token` header is for server-to-server agents that can't open a browser tab. They can coexist on the same deployment.
 
 **How do I add a new tool?**
-Full walkthrough in [docs/adding-a-tool.md](docs/adding-a-tool.md). The short version: create a `register*Tools(server)` module under [src/tools/](src/tools/), call `server.tool(name, description, zodSchema, handler)`, and route every Graph API call through `metaApiClient` ([src/meta/client.ts](src/meta/client.ts)) — never `fetch` directly. The shared client is what gives every tool bucketed rate-limiting, circuit breaking, write pacing, multi-tenant token resolution, and Meta-error → `McpError` classification for free. The smallest end-to-end example in the codebase is [src/tools/budget.ts](src/tools/budget.ts):
+Full walkthrough in [docs/adding-a-tool.md](docs/adding-a-tool.md). The short version: create a `register*Tools(server)` module under [src/tools/](src/tools/), call `server.registerTool(name, { description, inputSchema, annotations }, handler)` with the `ads_*` naming convention, and route every Graph API call through `metaApiClient` ([src/meta/client.ts](src/meta/client.ts)) — never `fetch` directly. The shared client is what gives every tool bucketed rate-limiting, circuit breaking, write pacing, multi-tenant token resolution, and Meta-error → `McpError` classification for free. The smallest end-to-end example in the codebase is [src/tools/budget.ts](src/tools/budget.ts):
 
 ```ts
-server.tool(
-  "meta_ads_create_budget_schedule",
-  "Schedule a temporary budget increase for a campaign…",
+import { CREATE, WRITE_WARNING } from "./_register.js";
+
+server.registerTool(
+  "ads_create_budget_schedule",
   {
-    campaign_id: z.string().describe("Campaign ID"),
-    budget_value: z.string(),
-    budget_value_type: z.enum(["ABSOLUTE", "MULTIPLIER"]),
-    time_start: z.string(),
-    time_end: z.string(),
+    description: `${WRITE_WARNING}Schedule a temporary budget increase for a campaign…`,
+    inputSchema: {
+      campaign_id: z.string().describe("Campaign ID"),
+      budget_value: z.string(),
+      budget_value_type: z.enum(["ABSOLUTE", "MULTIPLIER"]),
+      time_start: z.string(),
+      time_end: z.string(),
+    },
+    annotations: { ...CREATE },
   },
   async ({ campaign_id, budget_value, budget_value_type, time_start, time_end }) => {
+    const id = validateMetaId(campaign_id, "campaign");
     const result = await metaApiClient.postForm<{ id: string }>(
-      `/${campaign_id}/budget_schedules`,
+      `/${id}/budget_schedules`,
       { budget_value, budget_value_type, time_start, time_end },
     );
     return { content: [{ type: "text", text: `Budget schedule created! ID: ${result.id}` }] };

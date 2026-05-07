@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { metaApiClient } from "../meta/client.js";
+import { READ } from "./_register.js";
 
 /**
  * Read-only operator view of how close we are to Meta's throttles, which
@@ -7,10 +8,14 @@ import { metaApiClient } from "../meta/client.js";
  * deciding whether to batch vs. retry and for humans investigating slowness.
  */
 export function registerRateStatusTools(server: McpServer): void {
-  server.tool(
-    "meta_ads_rate_status",
-    "Show the current Meta API rate-limit usage across tokens, accounts, and use-case types, plus any open circuits and the write-pacer state. Does NOT call Meta — returns in-process state.",
-    {},
+  server.registerTool(
+    "ads_rate_status",
+    {
+      description:
+        "Show the current Meta API rate-limit usage across tokens, accounts, and use-case types, plus any open circuits and the write-pacer state. Does NOT call Meta — returns in-process state.",
+      inputSchema: {},
+      annotations: { ...READ },
+    },
     async () => {
       const { usage, circuits, writePacer } = metaApiClient.getUsageSnapshot();
 

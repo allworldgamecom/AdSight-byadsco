@@ -20,7 +20,7 @@ describe("registerAdSetTools", () => {
   it("registers exactly 6 tools", () => {
     const server = createMockMcpServer();
     registerAdSetTools(server as never);
-    expect(server.tool).toHaveBeenCalledTimes(6);
+    expect(server.registerTool).toHaveBeenCalledTimes(6);
   });
 
   it("registers tools with expected names", () => {
@@ -29,16 +29,16 @@ describe("registerAdSetTools", () => {
 
     const names = server._registeredTools.map((tool) => tool.name);
     expect(names).toEqual([
-      "meta_ads_get_adsets",
-      "meta_ads_get_adset_details",
-      "meta_ads_clone_adset_bundle",
-      "meta_ads_create_adset",
-      "meta_ads_update_adset",
-      "meta_ads_delete_adset",
+      "ads_get_ad_sets",
+      "ads_get_ad_set_details",
+      "ads_clone_ad_set_bundle",
+      "ads_create_ad_set",
+      "ads_update_ad_set",
+      "ads_delete_ad_set",
     ]);
   });
 
-  describe("meta_ads_get_adset_details handler", () => {
+  describe("ads_get_ad_set_details handler", () => {
     it("forces identity fields and never renders undefined with partial field requests", async () => {
       const server = createMockMcpServer();
       registerAdSetTools(server as never);
@@ -54,7 +54,7 @@ describe("registerAdSetTools", () => {
 
       const handler = server._registeredTools[1].handler;
       const result = await handler({
-        adset_id: "2001",
+        ad_set_id: "2001",
         fields: ["promoted_object"],
       }) as { content: Array<{ type: string; text: string }> };
 
@@ -75,7 +75,7 @@ describe("registerAdSetTools", () => {
     });
   });
 
-  describe("meta_ads_clone_adset_bundle handler", () => {
+  describe("ads_clone_ad_set_bundle handler", () => {
     it("returns a dry-run plan without mutations", async () => {
       const server = createMockMcpServer();
       registerAdSetTools(server as never);
@@ -144,8 +144,8 @@ describe("registerAdSetTools", () => {
       const handler = server._registeredTools[2].handler;
       const result = await handler({
         account_id: "act_123",
-        source_adset_id: "2099",
-        target_adset: {
+        source_ad_set_id: "2099",
+        target_ad_set: {
           name: "Chile - Mujeres",
           geo_override: { countries: ["CL"] },
           status: "PAUSED",
@@ -169,14 +169,14 @@ describe("registerAdSetTools", () => {
 
       const payload = JSON.parse(result.content[1].text) as {
         dry_run: boolean;
-        new_adset: { name: string; planned?: boolean };
+        new_ad_set: { name: string; planned?: boolean };
         created_creatives: Array<{ name: string; planned?: boolean }>;
         created_ads: Array<{ name: string; planned?: boolean }>;
       };
 
       expect(payload.dry_run).toBe(true);
-      expect(payload.new_adset.name).toBe("Chile - Mujeres");
-      expect(payload.new_adset.planned).toBe(true);
+      expect(payload.new_ad_set.name).toBe("Chile - Mujeres");
+      expect(payload.new_ad_set.planned).toBe(true);
       expect(payload.created_creatives).toHaveLength(1);
       expect(payload.created_creatives[0]?.name).toBe("Chile - Mujeres__flyer_1");
       expect(payload.created_creatives[0]?.planned).toBe(true);
@@ -251,8 +251,8 @@ describe("registerAdSetTools", () => {
       const handler = server._registeredTools[2].handler;
       const input = {
         account_id: "act_123",
-        source_adset_id: "2999",
-        target_adset: {
+        source_ad_set_id: "2999",
+        target_ad_set: {
           name: "Chile - Mujeres",
           geo_override: { countries: ["CL"] },
           status: "PAUSED",
@@ -276,12 +276,12 @@ describe("registerAdSetTools", () => {
 
       const first = await handler(input) as { content: Array<{ type: string; text: string }> };
       const firstPayload = JSON.parse(first.content[1].text) as {
-        new_adset: { id?: string };
+        new_ad_set: { id?: string };
         created_creatives: Array<{ id?: string }>;
         created_ads: Array<{ id?: string }>;
       };
 
-      expect(firstPayload.new_adset.id).toBe("20001");
+      expect(firstPayload.new_ad_set.id).toBe("20001");
       expect(firstPayload.created_creatives[0]?.id).toBe("40001");
       expect(firstPayload.created_ads[0]?.id).toBe("30001");
       expect(vi.mocked(fetch)).toHaveBeenCalledTimes(6);
@@ -292,18 +292,18 @@ describe("registerAdSetTools", () => {
     });
   });
 
-  describe("meta_ads_update_adset handler", () => {
-    it("issues POST /<adset_id> with only the budget field and confirms success", async () => {
+  describe("ads_update_ad_set handler", () => {
+    it("issues POST /<ad_set_id> with only the budget field and confirms success", async () => {
       const server = createMockMcpServer();
       registerAdSetTools(server as never);
 
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse({ success: true })));
 
-      const tool = server._registeredTools.find((t) => t.name === "meta_ads_update_adset");
+      const tool = server._registeredTools.find((t) => t.name === "ads_update_ad_set");
       expect(tool).toBeDefined();
 
       const result = await tool!.handler({
-        adset_id: "2001",
+        ad_set_id: "2001",
         daily_budget: 5000,
       }) as { content: Array<{ type: string; text: string }> };
 

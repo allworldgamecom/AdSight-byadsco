@@ -5,6 +5,7 @@ import { registerAdSetTools } from "./adsets.js";
 import { registerAdTools } from "./ads.js";
 import { registerCreativeTools } from "./creatives.js";
 import { registerInsightsTools } from "./insights.js";
+import { registerInsightsViewTools } from "./insights-views.js";
 import { registerTargetingTools } from "./targeting.js";
 import { registerBudgetTools } from "./budget.js";
 import { registerLeadTools } from "./leads.js";
@@ -19,9 +20,19 @@ import { registerBillingTools } from "./billing.js";
 import { registerTokenTools } from "./tokens.js";
 import { registerInstagramTools } from "./instagram.js";
 import { registerRateStatusTools } from "./rate-status.js";
+import { registerEntityTools } from "./entities.js";
+import { registerDiagnosticTools } from "./diagnostics.js";
+import { registerHelpTools } from "./help.js";
+import { registerMacroTools } from "./macros.js";
 
 /**
  * Register all Meta Ads tools on the MCP server.
+ *
+ * v3.0.0 alignment with Meta's official MCP vocabulary:
+ *   - all tools prefixed `ads_*` (no more `meta_ads_*`)
+ *   - `ad_set` (with underscore) replaces `adset`
+ *   - all tools annotated with ToolAnnotations (readOnlyHint / destructiveHint)
+ *   - 5 named insight views + diagnostic + help + agency macro-tools added
  */
 export function registerAllTools(server: McpServer): void {
   // ─── Core Ad Management ─────────────────────────────────
@@ -30,7 +41,9 @@ export function registerAllTools(server: McpServer): void {
   registerAdSetTools(server);        // 6 tools
   registerAdTools(server);           // 5 tools
   registerCreativeTools(server);     // 9 tools
-  registerInsightsTools(server);     // 2 tools
+  registerEntityTools(server);       // 3 tools — generic helpers (get_ad_entities, update_entity, activate_entity)
+  registerInsightsTools(server);     // 1 tool  — power-tool ads_get_insights
+  registerInsightsViewTools(server); // 5 tools — semantic insight views
   registerTargetingTools(server);    // 7 tools
   registerBudgetTools(server);       // 1 tool
 
@@ -46,11 +59,18 @@ export function registerAllTools(server: McpServer): void {
   registerBillingTools(server);      // 3 tools — Billing & spend limits
   registerRateStatusTools(server);   // 1 tool — Rate-limit usage + circuit status
 
+  // ─── Diagnostics & Help ─────────────────────────────────
+  registerDiagnosticTools(server);   // 3 tools — opportunity_score, dataset_quality, errors
+  registerHelpTools(server);         // 1 tool  — help_article search
+
+  // ─── Agency Macros (cross-account) ──────────────────────
+  registerMacroTools(server);        // 2 tools — diagnose_underperformance, portfolio_summary
+
   // ─── Instagram ──────────────────────────────────────────
   registerInstagramTools(server);    // 2 tools — IG account & media lookup
 
   // ─── Token Management ────────────────────────────────────
   registerTokenTools(server);        // 4 tools — list / set-active / register / delete
 
-  // Total: 80 tools
+  // Total: 92 tools (79 renamed + 13 new in v3)
 }

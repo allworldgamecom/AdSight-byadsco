@@ -5,16 +5,21 @@ import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { AUDIENCE_DEFAULT_FIELDS } from "../meta/types/audience.js";
 import type { CustomAudience, MetaApiResponse } from "../meta/types/index.js";
+import { READ, CREATE, DELETE, WRITE_WARNING } from "./_register.js";
 
 export function registerAudienceTools(server: McpServer): void {
   // ─── Get Custom Audiences ─────────────────────────────────────
-  server.tool(
-    "meta_ads_get_custom_audiences",
-    "List custom audiences for an ad account. Includes lookalikes, website audiences, customer lists, engagement audiences and offline-conversion audiences. Use the returned audience id with meta_ads_update_adset (targeting.custom_audiences=[{id}]) to apply the audience to an ad set.",
+  server.registerTool(
+    "ads_get_custom_audiences",
     {
-      account_id: z.string().describe("Ad account ID"),
-      limit: z.number().min(1).max(100).default(25),
-      fields: z.array(z.string()).optional(),
+      description:
+        "List custom audiences for an ad account. Includes lookalikes, website audiences, customer lists, engagement audiences and offline-conversion audiences. Use the returned audience id with ads_update_ad_set (targeting.custom_audiences=[{id}]) to apply the audience to an ad set.",
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        limit: z.number().min(1).max(100).default(25),
+        fields: z.array(z.string()).optional(),
+      },
+      annotations: { ...READ },
     },
     async ({ account_id, limit, fields }) => {
       const id = normalizeAccountId(account_id);
@@ -46,12 +51,16 @@ export function registerAudienceTools(server: McpServer): void {
   );
 
   // ─── Get Audience Details ─────────────────────────────────────
-  server.tool(
-    "meta_ads_get_audience_details",
-    "Get detailed information about a specific custom audience, including subtype, retention period, approximate size bounds and lookalike spec. Useful before applying it to an ad set via meta_ads_update_adset.",
+  server.registerTool(
+    "ads_get_audience_details",
     {
-      audience_id: z.string().describe("Custom audience ID"),
-      fields: z.array(z.string()).optional(),
+      description:
+        "Get detailed information about a specific custom audience, including subtype, retention period, approximate size bounds and lookalike spec. Useful before applying it to an ad set via ads_update_ad_set.",
+      inputSchema: {
+        audience_id: z.string().describe("Custom audience ID"),
+        fields: z.array(z.string()).optional(),
+      },
+      annotations: { ...READ },
     },
     async ({ audience_id, fields }) => {
       const id = validateMetaId(audience_id, "audience");
@@ -75,28 +84,31 @@ export function registerAudienceTools(server: McpServer): void {
   );
 
   // ─── Create Custom Audience ───────────────────────────────────
-  server.tool(
-    "meta_ads_create_custom_audience",
-    "Create a new custom audience on an ad account (CUSTOM customer-list, WEBSITE pixel-based, APP, OFFLINE_CONVERSION or ENGAGEMENT). For CUSTOM/customer-list audiences, PII (email, phone) must be SHA-256 hashed before upload. After creation: (1) optionally feed users via the customer-list endpoint, (2) build a lookalike with meta_ads_create_lookalike_audience, and (3) apply the audience id to an ad set with meta_ads_update_adset (targeting.custom_audiences=[{id}]).",
+  server.registerTool(
+    "ads_create_custom_audience",
     {
-      account_id: z.string().describe("Ad account ID"),
-      name: z.string().min(1).describe("Audience name"),
-      description: z.string().optional().describe("Audience description"),
-      subtype: z
-        .enum(["CUSTOM", "WEBSITE", "APP", "OFFLINE_CONVERSION", "ENGAGEMENT"])
-        .default("CUSTOM")
-        .describe("Audience subtype"),
-      customer_file_source: z
-        .enum([
-          "USER_PROVIDED_ONLY",
-          "PARTNER_PROVIDED_ONLY",
-          "BOTH_USER_AND_PARTNER_PROVIDED",
-        ])
-        .optional()
-        .describe("Source of customer data (required for CUSTOM subtype)"),
-      retention_days: z.number().optional().describe("Retention period in days"),
-      rule: z.string().optional().describe("Rule definition for WEBSITE audiences (JSON string)"),
-      prefill: z.boolean().optional().describe("Whether to prefill with existing data (for WEBSITE)"),
+      description: `${WRITE_WARNING}Create a new custom audience on an ad account (CUSTOM customer-list, WEBSITE pixel-based, APP, OFFLINE_CONVERSION or ENGAGEMENT). For CUSTOM/customer-list audiences, PII (email, phone) must be SHA-256 hashed before upload. After creation: (1) optionally feed users via the customer-list endpoint, (2) build a lookalike with ads_create_lookalike_audience, and (3) apply the audience id to an ad set with ads_update_ad_set (targeting.custom_audiences=[{id}]).`,
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        name: z.string().min(1).describe("Audience name"),
+        description: z.string().optional().describe("Audience description"),
+        subtype: z
+          .enum(["CUSTOM", "WEBSITE", "APP", "OFFLINE_CONVERSION", "ENGAGEMENT"])
+          .default("CUSTOM")
+          .describe("Audience subtype"),
+        customer_file_source: z
+          .enum([
+            "USER_PROVIDED_ONLY",
+            "PARTNER_PROVIDED_ONLY",
+            "BOTH_USER_AND_PARTNER_PROVIDED",
+          ])
+          .optional()
+          .describe("Source of customer data (required for CUSTOM subtype)"),
+        retention_days: z.number().optional().describe("Retention period in days"),
+        rule: z.string().optional().describe("Rule definition for WEBSITE audiences (JSON string)"),
+        prefill: z.boolean().optional().describe("Whether to prefill with existing data (for WEBSITE)"),
+      },
+      annotations: { ...CREATE },
     },
     async ({ account_id, name, description, subtype, customer_file_source, retention_days, rule, prefill }) => {
       const id = normalizeAccountId(account_id);
@@ -129,16 +141,19 @@ export function registerAudienceTools(server: McpServer): void {
   );
 
   // ─── Create Lookalike Audience ────────────────────────────────
-  server.tool(
-    "meta_ads_create_lookalike_audience",
-    "Create a lookalike audience seeded by an existing custom audience. Source must have ~100+ matched users or Meta rejects the request. Ratio controls similarity vs. reach (0.01 = closest 1%, 0.20 = top 20% — bigger reach, lower similarity). After creation, apply the lookalike id to an ad set with meta_ads_update_adset (targeting.custom_audiences=[{id}]). Lookalikes typically need ~24 h to compute users — id is returned immediately but reach starts at zero.",
+  server.registerTool(
+    "ads_create_lookalike_audience",
     {
-      account_id: z.string().describe("Ad account ID"),
-      name: z.string().min(1).describe("Lookalike audience name"),
-      origin_audience_id: z.string().describe("Source custom audience ID"),
-      ratio: z.number().min(0.01).max(0.20).describe("Lookalike ratio (0.01 = 1%, 0.20 = 20%)"),
-      country: z.string().describe("Target country ISO code (e.g., CO, US, MX)"),
-      description: z.string().optional(),
+      description: `${WRITE_WARNING}Create a lookalike audience seeded by an existing custom audience. Source must have ~100+ matched users or Meta rejects the request. Ratio controls similarity vs. reach (0.01 = closest 1%, 0.20 = top 20% — bigger reach, lower similarity). After creation, apply the lookalike id to an ad set with ads_update_ad_set (targeting.custom_audiences=[{id}]). Lookalikes typically need ~24 h to compute users — id is returned immediately but reach starts at zero.`,
+      inputSchema: {
+        account_id: z.string().describe("Ad account ID"),
+        name: z.string().min(1).describe("Lookalike audience name"),
+        origin_audience_id: z.string().describe("Source custom audience ID"),
+        ratio: z.number().min(0.01).max(0.20).describe("Lookalike ratio (0.01 = 1%, 0.20 = 20%)"),
+        country: z.string().describe("Target country ISO code (e.g., CO, US, MX)"),
+        description: z.string().optional(),
+      },
+      annotations: { ...CREATE },
     },
     async ({ account_id, name, origin_audience_id, ratio, country, description }) => {
       const accountPath = normalizeAccountId(account_id);
@@ -174,11 +189,14 @@ export function registerAudienceTools(server: McpServer): void {
   );
 
   // ─── Delete Custom Audience ───────────────────────────────────
-  server.tool(
-    "meta_ads_delete_custom_audience",
-    "Permanently delete a custom audience from the ad account. Cannot be undone. To remove an audience from a single ad set without destroying it everywhere, prefer meta_ads_update_adset with targeting.custom_audiences set to a different array (or omitted from a fresh targeting spec).",
+  server.registerTool(
+    "ads_delete_custom_audience",
     {
-      audience_id: z.string().describe("Custom audience ID to delete"),
+      description: `${WRITE_WARNING}Permanently delete a custom audience from the ad account. Cannot be undone. To remove an audience from a single ad set without destroying it everywhere, prefer ads_update_ad_set with targeting.custom_audiences set to a different array (or omitted from a fresh targeting spec).`,
+      inputSchema: {
+        audience_id: z.string().describe("Custom audience ID to delete"),
+      },
+      annotations: { ...DELETE },
     },
     async ({ audience_id }) => {
       const id = validateMetaId(audience_id, "audience");

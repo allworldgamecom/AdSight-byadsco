@@ -15,7 +15,7 @@ npm install
 cp .env.example .env   # fill in only what you need for the mode you'll test
 ```
 
-You need **Node.js 20+**. The Docker image runs on Node 22; both work for development.
+You need **Node.js 20.10+** (Import Attributes syntax is used for JSON imports). The Docker image runs on Node 22; both work for development.
 
 For multi-tenant HTTP testing locally:
 
@@ -56,11 +56,13 @@ A separate CI job runs [gitleaks](https://github.com/gitleaks/gitleaks) against 
 
 ## Adding a new tool
 
-If you want to expose a Meta Marketing API endpoint that the 80 built-in tools don't cover, see the full walkthrough in [docs/adding-a-tool.md](docs/adding-a-tool.md). Quick summary:
+If you want to expose a Meta Marketing API endpoint that the 93 built-in tools don't cover, see the full walkthrough in [docs/adding-a-tool.md](docs/adding-a-tool.md). Quick summary:
 
-- New file under [src/tools/](src/tools/) (or extend an existing category) exporting a `register*Tools(server)` function that calls `server.tool(name, description, zodSchema, handler)`.
+- New file under [src/tools/](src/tools/) (or extend an existing category) exporting a `register*Tools(server)` function that calls `server.registerTool(name, { description, inputSchema, annotations }, handler)`.
+- Use the `ads_*` naming convention (no `meta_` prefix) and the modern `registerTool` API. The legacy `server.tool(...)` form is deprecated upstream and removed from this repo in v3.0.0.
+- Spread the right ToolAnnotations from [src/tools/_register.ts](src/tools/_register.ts) (`READ` / `CREATE` / `UPDATE` / `DELETE` / `TOGGLE` / `UPLOAD` / `TOKEN`) and prefix write-tool descriptions with `WRITE_WARNING`.
 - The handler **must** route every Graph API call through `metaApiClient` ([src/meta/client.ts](src/meta/client.ts)) — never `fetch` directly. The shared client is what gives you bucketed rate-limiting, the circuit breaker, write pacing, and Meta-error → `McpError` classification.
-- Register the new module in [src/tools/index.ts](src/tools/index.ts) and bump the count in [tests/tools/registration.test.ts](tests/tools/registration.test.ts). Mirror the source path under `tests/tools/` with a vitest using the shared mocks in [tests/setup.ts](tests/setup.ts).
+- Register the new module in [src/tools/index.ts](src/tools/index.ts) and bump the count in [tests/tools/registration.test.ts](tests/tools/registration.test.ts). Mirror the source path under `tests/tools/` with a vitest using the shared mocks in [tests/setup.ts](tests/setup.ts) — `createMockMcpServer()` records both `server.tool` and `server.registerTool` calls.
 
 ## Auth surface — extra scrutiny
 

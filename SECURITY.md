@@ -30,14 +30,13 @@ If we miss any of these targets, ping us again on the same thread.
 
 ## Supported versions
 
-This project does not yet ship versioned releases. Only the **latest commit on `main`** is supported.
-
 | Version | Supported |
-|---------|-----------|
-| `main` (latest) | ✅ |
-| Anything older  | ❌ |
+| --- | --- |
+| `3.x` (latest, including `main`) | ✅ |
+| `2.x` | ❌ — superseded by 3.0.0 (2026-05). See [docs/migration-v3.md](docs/migration-v3.md). |
+| Anything older | ❌ |
 
-If we publish tagged releases later, we will update this table to call out which minor versions still receive security fixes.
+Security fixes land first on `main` and are tagged into the next 3.x patch release. There is no 2.x backport line.
 
 ## Scope
 
