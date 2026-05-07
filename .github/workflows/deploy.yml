@@ -366,3 +366,66 @@ jobs:
             echo "OAuth metadata check FAILED (HTTP ${OAUTH_STATUS})"
             exit 1
           fi
+
+  release:
+    # Auto-publish a GitHub Release when package.json version is bumped on main.
+    # Idempotent: skips silently if a release for the current version already
+    # exists. The created release fires publish.yml which ships to npm.pkg.github.com
+    # and ghcr.io. Prereleases (versions containing "-") get --prerelease.
+    name: Auto-publish GitHub Release
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 0   # full history needed for --generate-notes
+
+      - name: Read package.json version
+        id: version
+        run: |
+          set -eu
+          VERSION=$(node -p "require('./package.json').version")
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "Invalid version in package.json: '$VERSION'"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if release already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No release for $TAG yet — will create."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          IS_PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          set -eu
+          ARGS=("$TAG" --target main --generate-notes)
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            ARGS+=(--prerelease)
+          fi
+          gh release create "${ARGS[@]}"
+          echo "Released $TAG. publish.yml is now queued to ship npm + ghcr artifacts."
