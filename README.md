@@ -132,7 +132,7 @@ Tool definitions live under [src/tools/](src/tools/), wired together in [src/too
 
 ### Prerequisites
 
-- **Node.js 20+** (Node 22 used in the Docker image).
+- **Node.js 20.10+** (the project uses Import Attributes for JSON imports). Node 22 is used in the Docker image.
 - A **Meta access token** with `ads_management` and `ads_read` permissions, *or* a Meta App configured for Facebook Login (see below).
 
 ### Install & run
@@ -718,22 +718,28 @@ For local dev / single-user, yes — set `META_ACCESS_TOKEN` and use `npm run de
 OAuth is for human users with a browser (Claude Desktop, Claude Web, Cursor users). API key + `X-Meta-Token` header is for server-to-server agents that can't open a browser tab. They can coexist on the same deployment.
 
 **How do I add a new tool?**
-Full walkthrough in [docs/adding-a-tool.md](docs/adding-a-tool.md). The short version: create a `register*Tools(server)` module under [src/tools/](src/tools/), call `server.tool(name, description, zodSchema, handler)`, and route every Graph API call through `metaApiClient` ([src/meta/client.ts](src/meta/client.ts)) — never `fetch` directly. The shared client is what gives every tool bucketed rate-limiting, circuit breaking, write pacing, multi-tenant token resolution, and Meta-error → `McpError` classification for free. The smallest end-to-end example in the codebase is [src/tools/budget.ts](src/tools/budget.ts):
+Full walkthrough in [docs/adding-a-tool.md](docs/adding-a-tool.md). The short version: create a `register*Tools(server)` module under [src/tools/](src/tools/), call `server.registerTool(name, { description, inputSchema, annotations }, handler)` with the `ads_*` naming convention, and route every Graph API call through `metaApiClient` ([src/meta/client.ts](src/meta/client.ts)) — never `fetch` directly. The shared client is what gives every tool bucketed rate-limiting, circuit breaking, write pacing, multi-tenant token resolution, and Meta-error → `McpError` classification for free. The smallest end-to-end example in the codebase is [src/tools/budget.ts](src/tools/budget.ts):
 
 ```ts
-server.tool(
+import { CREATE, WRITE_WARNING } from "./_register.js";
+
+server.registerTool(
   "ads_create_budget_schedule",
-  "Schedule a temporary budget increase for a campaign…",
   {
-    campaign_id: z.string().describe("Campaign ID"),
-    budget_value: z.string(),
-    budget_value_type: z.enum(["ABSOLUTE", "MULTIPLIER"]),
-    time_start: z.string(),
-    time_end: z.string(),
+    description: `${WRITE_WARNING}Schedule a temporary budget increase for a campaign…`,
+    inputSchema: {
+      campaign_id: z.string().describe("Campaign ID"),
+      budget_value: z.string(),
+      budget_value_type: z.enum(["ABSOLUTE", "MULTIPLIER"]),
+      time_start: z.string(),
+      time_end: z.string(),
+    },
+    annotations: { ...CREATE },
   },
   async ({ campaign_id, budget_value, budget_value_type, time_start, time_end }) => {
+    const id = validateMetaId(campaign_id, "campaign");
     const result = await metaApiClient.postForm<{ id: string }>(
-      `/${campaign_id}/budget_schedules`,
+      `/${id}/budget_schedules`,
       { budget_value, budget_value_type, time_start, time_end },
     );
     return { content: [{ type: "text", text: `Budget schedule created! ID: ${result.id}` }] };

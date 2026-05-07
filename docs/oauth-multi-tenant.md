@@ -189,7 +189,7 @@ curl -sX POST "https://mcp.example.com/mcp" \
     "id": 1,
     "method": "tools/call",
     "params": {
-      "name": "meta_ads_get_ad_accounts",
+      "name": "ads_get_ad_accounts",
       "arguments": {}
     }
   }'
@@ -343,4 +343,4 @@ curl -sX POST "http://localhost:3000/register" \
 open "http://localhost:3000/authorize?response_type=code&client_id=<id>&redirect_uri=http%3A%2F%2Flocalhost%2Fcb&code_challenge=$(openssl rand -base64 32 | tr -d '=' | tr '+/' '-_')&code_challenge_method=S256"
 ```
 
-Then test that `meta_ads_get_ad_accounts` works with the resulting JWT.
+Then test that `ads_get_ad_accounts` works with the resulting JWT.
