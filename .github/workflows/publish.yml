@@ -3,6 +3,21 @@ name: Publish to GitHub Packages
 on:
   release:
     types: [published]
+  workflow_call:
+    # Allow deploy.yml to invoke this workflow after creating a release with
+    # GITHUB_TOKEN. Releases created by GITHUB_TOKEN do not fire the `release`
+    # event by design (GitHub blocks recursive workflow triggers), so we have
+    # to call publish.yml explicitly from the workflow that creates the tag.
+    inputs:
+      tag:
+        description: Release tag to publish (e.g. v3.0.0)
+        required: true
+        type: string
+      prerelease:
+        description: Whether to publish as a prerelease (next dist-tag, no :latest)
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -11,7 +26,7 @@ permissions:
   attestations: write
 
 concurrency:
-  group: publish-${{ github.ref }}
+  group: publish-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -22,6 +37,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          # When triggered by `release` event, github.ref already points to the
+          # tag; when called via workflow_call, github.ref is the caller's ref
+          # so we must explicitly check out the tag we were asked to publish.
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
@@ -57,6 +77,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
@@ -75,7 +97,10 @@ jobs:
       - name: Determine npm dist-tag
         id: disttag
         env:
-          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+          # When triggered by release event, github.event.release.prerelease is
+          # the source of truth; when called via workflow_call, inputs.prerelease
+          # is what the caller passed.
+          IS_PRERELEASE: ${{ github.event.release.prerelease || inputs.prerelease }}
         run: |
           if [ "$IS_PRERELEASE" = "true" ]; then
             echo "tag=next" >> "$GITHUB_OUTPUT"
@@ -97,6 +122,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
@@ -110,11 +137,15 @@ jobs:
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051  # v5
         with:
           images: ghcr.io/byadsco/meta-ads-mcp
+          # type=semver normally derives the version from github.ref. When this
+          # workflow is invoked via workflow_call, github.ref is the caller's
+          # branch (not the tag), so we override `value=` with the tag we were
+          # asked to publish. github.ref_name on a release event is the tag name.
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ !github.event.release.prerelease }}
+            type=semver,pattern={{version}},value=${{ inputs.tag || github.ref_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag || github.ref_name }}
+            type=semver,pattern={{major}},value=${{ inputs.tag || github.ref_name }}
+            type=raw,value=latest,enable=${{ !(github.event.release.prerelease || inputs.prerelease) }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
