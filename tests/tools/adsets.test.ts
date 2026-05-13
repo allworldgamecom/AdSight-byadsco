@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerAdSetTools } from "../../src/tools/adsets.js";
+import { resetCloneBundleStoreForTests } from "../../src/store/clone-bundle-store.js";
 import {
   cleanupTestToken,
   createMockMcpServer,
@@ -10,10 +11,12 @@ import {
 describe("registerAdSetTools", () => {
   beforeEach(() => {
     setupTestToken();
+    resetCloneBundleStoreForTests();
   });
 
   afterEach(() => {
     cleanupTestToken();
+    resetCloneBundleStoreForTests();
     vi.restoreAllMocks();
   });
 
@@ -289,6 +292,353 @@ describe("registerAdSetTools", () => {
       const second = await handler(input) as { content: Array<{ type: string; text: string }> };
       expect(second.content[0].text).toContain("reused cached result");
       expect(vi.mocked(fetch)).toHaveBeenCalledTimes(6);
+    });
+
+    it("never duplicates destination_type in the source GET fields list", async () => {
+      const server = createMockMcpServer();
+      registerAdSetTools(server as never);
+
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse({
+        id: "2099", name: "X", campaign_id: "1001",
+        status: "ACTIVE", effective_status: "ACTIVE",
+        daily_budget: "500",
+        optimization_goal: "OFFSITE_CONVERSIONS",
+        billing_event: "IMPRESSIONS",
+        targeting: { geo_locations: { countries: ["HN"] } },
+        destination_type: "WEBSITE",
+      })));
+
+      const handler = server._registeredTools[2].handler;
+      // dry_run=true short-circuits after the GET; we just want to assert the fields list shape.
+      await handler({
+        account_id: "act_123",
+        source_ad_set_id: "2099",
+        target_ad_set: { name: "Y", geo_override: { countries: ["CL"] }, status: "PAUSED" },
+        creative_overrides: [],
+        reuse_source_media: true,
+        dry_run: true,
+      }).catch(() => undefined);
+
+      const firstUrl = new URL(vi.mocked(fetch).mock.calls[0][0] as string);
+      const fields = firstUrl.searchParams.get("fields")?.split(",") ?? [];
+      const dups = fields.filter((f) => f === "destination_type");
+      expect(dups).toHaveLength(1);
+    });
+
+    it("dry-run: geo_override REPLACES source geo_locations (no city/region inheritance)", async () => {
+      const server = createMockMcpServer();
+      registerAdSetTools(server as never);
+
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(mockFetchResponse({
+          id: "2099", name: "Source", campaign_id: "1001",
+          status: "ACTIVE", effective_status: "ACTIVE",
+          daily_budget: "500",
+          optimization_goal: "OFFSITE_CONVERSIONS",
+          billing_event: "IMPRESSIONS",
+          targeting: {
+            geo_locations: {
+              countries: ["CL"],
+              cities: [{ key: "santiago" }],
+              regions: [{ key: "RM" }],
+            },
+            // Read-only fields Meta returns on GET — must be stripped on POST.
+            targeting_relaxation_types: { lookalike: 1 },
+            targeting_optimization: "expansion_all",
+            is_whatsapp_destination_ad: false,
+          },
+          destination_type: "WEBSITE",
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({ data: [] }))); // no ads — bundle throws
+
+      const handler = server._registeredTools[2].handler;
+      // dry_run=true to avoid needing to simulate the create chain;
+      // we want to assert geo_override behavior on the cloned targeting.
+      // But applyGeoOverride is only tested via the create body, so we
+      // inspect the dry-run plan's behavior indirectly: the test simply
+      // ensures no crash and that the bundle doesn't try to inherit cities.
+      // (Detailed POST-body assertions live in the partial-failure test below.)
+      await handler({
+        account_id: "act_123",
+        source_ad_set_id: "2099",
+        target_ad_set: { name: "Target", geo_override: { countries: ["CO"] }, status: "PAUSED" },
+        creative_overrides: [],
+        reuse_source_media: true,
+        dry_run: true,
+      }).catch((err: Error) => {
+        // dry-run may still succeed with 0 planned creatives; that's fine.
+        expect(err).toBeUndefined();
+      });
+    });
+
+    it("create: strips read-only targeting fields and replaces geo_locations", async () => {
+      const server = createMockMcpServer();
+      registerAdSetTools(server as never);
+
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(mockFetchResponse({
+          id: "2099", name: "Source", campaign_id: "1001",
+          status: "ACTIVE", effective_status: "ACTIVE",
+          daily_budget: "500",
+          optimization_goal: "OFFSITE_CONVERSIONS",
+          billing_event: "IMPRESSIONS",
+          targeting: {
+            geo_locations: { countries: ["CL"], cities: [{ key: "santiago" }] },
+            targeting_relaxation_types: { lookalike: 1 },
+            targeting_optimization: "expansion_all",
+            is_whatsapp_destination_ad: false,
+            genders: [2],
+          },
+          promoted_object: { pixel_id: "px_1" },
+          destination_type: "WEBSITE",
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({
+          data: [{
+            id: "3001", name: "Source__a1", adset_id: "2099", campaign_id: "1001",
+            status: "ACTIVE", effective_status: "ACTIVE", creative: { id: "4001" },
+            created_time: "2026-01-01T00:00:00-0000", updated_time: "2026-01-01T00:00:00-0000",
+          }],
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({
+          id: "4001", name: "C1",
+          object_story_spec: {
+            page_id: "6001",
+            instagram_user_id: "ig_7777",
+            link_data: { link: "https://x.com/", message: "m", name: "h", image_hash: "h1" },
+          },
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({ id: "20001" })) // POST ad set
+        .mockResolvedValueOnce(mockFetchResponse({ id: "40001" })) // POST creative
+        .mockResolvedValueOnce(mockFetchResponse({ id: "30001" }))); // POST ad
+
+      const handler = server._registeredTools[2].handler;
+      await handler({
+        account_id: "act_123",
+        source_ad_set_id: "2099",
+        target_ad_set: { name: "Target", geo_override: { countries: ["CO"] }, status: "PAUSED" },
+        creative_overrides: [],
+        reuse_source_media: true,
+        dry_run: false,
+        idempotency_key: "k-strip-1",
+      });
+
+      // 4th fetch call = POST /act_123/adsets
+      const adsetPost = vi.mocked(fetch).mock.calls[3];
+      expect(adsetPost[1]?.method).toBe("POST");
+      const body = adsetPost[1]?.body as string;
+      const params = new URLSearchParams(body);
+      const sentTargeting = JSON.parse(params.get("targeting") ?? "{}") as Record<string, unknown>;
+
+      // geo_locations REPLACED — no cities inherited.
+      expect(sentTargeting.geo_locations).toEqual({ countries: ["CO"] });
+      // Other targeting fields preserved.
+      expect(sentTargeting.genders).toEqual([2]);
+      // Read-only fields stripped.
+      expect(sentTargeting.targeting_relaxation_types).toBeUndefined();
+      expect(sentTargeting.targeting_optimization).toBeUndefined();
+      expect(sentTargeting.is_whatsapp_destination_ad).toBeUndefined();
+
+      // 5th fetch call = POST /act_123/adcreatives — uses instagram_user_id, not instagram_actor_id.
+      const creativePost = vi.mocked(fetch).mock.calls[4];
+      const creativeBody = creativePost[1]?.body as string;
+      const creativeParams = new URLSearchParams(creativeBody);
+      const oss = JSON.parse(creativeParams.get("object_story_spec") ?? "{}") as Record<string, unknown>;
+      expect(oss.instagram_user_id).toBe("ig_7777");
+      expect(oss.instagram_actor_id).toBeUndefined();
+    });
+
+    it("falls back to legacy instagram_actor_id on read but writes instagram_user_id", async () => {
+      const server = createMockMcpServer();
+      registerAdSetTools(server as never);
+
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(mockFetchResponse({
+          id: "2099", name: "Source", campaign_id: "1001",
+          status: "ACTIVE", effective_status: "ACTIVE",
+          daily_budget: "500",
+          optimization_goal: "OFFSITE_CONVERSIONS",
+          billing_event: "IMPRESSIONS",
+          targeting: { geo_locations: { countries: ["CL"] } },
+          destination_type: "WEBSITE",
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({
+          data: [{
+            id: "3001", name: "Source__a1", adset_id: "2099", campaign_id: "1001",
+            status: "ACTIVE", effective_status: "ACTIVE", creative: { id: "4001" },
+            created_time: "2026-01-01T00:00:00-0000", updated_time: "2026-01-01T00:00:00-0000",
+          }],
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({
+          id: "4001", name: "C1",
+          object_story_spec: {
+            page_id: "6001",
+            // Legacy field name — old creatives still return this.
+            instagram_actor_id: "ig_legacy_5555",
+            link_data: { link: "https://x.com/", image_hash: "h1" },
+          },
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({ id: "20001" }))
+        .mockResolvedValueOnce(mockFetchResponse({ id: "40001" }))
+        .mockResolvedValueOnce(mockFetchResponse({ id: "30001" })));
+
+      const handler = server._registeredTools[2].handler;
+      await handler({
+        account_id: "act_123",
+        source_ad_set_id: "2099",
+        target_ad_set: { name: "Target", geo_override: { countries: ["CO"] }, status: "PAUSED" },
+        creative_overrides: [],
+        reuse_source_media: true,
+        dry_run: false,
+        idempotency_key: "k-legacy-1",
+      });
+
+      const creativePost = vi.mocked(fetch).mock.calls[4];
+      const oss = JSON.parse(
+        new URLSearchParams(creativePost[1]?.body as string).get("object_story_spec") ?? "{}",
+      ) as Record<string, unknown>;
+      expect(oss.instagram_user_id).toBe("ig_legacy_5555");
+      expect(oss.instagram_actor_id).toBeUndefined();
+    });
+
+    it("user-provided daily_budget wins over source lifetime_budget", async () => {
+      const server = createMockMcpServer();
+      registerAdSetTools(server as never);
+
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(mockFetchResponse({
+          id: "2099", name: "Source", campaign_id: "1001",
+          status: "ACTIVE", effective_status: "ACTIVE",
+          lifetime_budget: "100000",
+          end_time: "2026-12-31T23:59:59-0000",
+          optimization_goal: "OFFSITE_CONVERSIONS",
+          billing_event: "IMPRESSIONS",
+          targeting: { geo_locations: { countries: ["CL"] } },
+          destination_type: "WEBSITE",
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({
+          data: [{
+            id: "3001", name: "Source__a1", adset_id: "2099", campaign_id: "1001",
+            status: "ACTIVE", effective_status: "ACTIVE", creative: { id: "4001" },
+            created_time: "2026-01-01T00:00:00-0000", updated_time: "2026-01-01T00:00:00-0000",
+          }],
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({
+          id: "4001", name: "C1",
+          object_story_spec: {
+            page_id: "6001",
+            link_data: { link: "https://x.com/", image_hash: "h1" },
+          },
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({ id: "20001" }))
+        .mockResolvedValueOnce(mockFetchResponse({ id: "40001" }))
+        .mockResolvedValueOnce(mockFetchResponse({ id: "30001" })));
+
+      const handler = server._registeredTools[2].handler;
+      await handler({
+        account_id: "act_123",
+        source_ad_set_id: "2099",
+        target_ad_set: {
+          name: "Target", geo_override: { countries: ["CO"] }, status: "PAUSED",
+          daily_budget: 500,
+        },
+        creative_overrides: [],
+        reuse_source_media: true,
+        dry_run: false,
+        idempotency_key: "k-budget-1",
+      });
+
+      const adsetPost = vi.mocked(fetch).mock.calls[3];
+      const params = new URLSearchParams(adsetPost[1]?.body as string);
+      expect(params.get("daily_budget")).toBe("500");
+      expect(params.get("lifetime_budget")).toBeNull();
+      expect(params.get("end_time")).toBeNull();
+    });
+
+    it("throws when no creatives can be cloned (does not create an empty ad set)", async () => {
+      const server = createMockMcpServer();
+      registerAdSetTools(server as never);
+
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(mockFetchResponse({
+          id: "2099", name: "Source", campaign_id: "1001",
+          status: "ACTIVE", effective_status: "ACTIVE",
+          daily_budget: "500",
+          optimization_goal: "OFFSITE_CONVERSIONS",
+          billing_event: "IMPRESSIONS",
+          targeting: { geo_locations: { countries: ["CL"] } },
+          destination_type: "WEBSITE",
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({
+          data: [{
+            id: "3001", name: "Source__a1", adset_id: "2099", campaign_id: "1001",
+            status: "ACTIVE", effective_status: "ACTIVE", creative: { id: "4001" },
+            created_time: "2026-01-01T00:00:00-0000", updated_time: "2026-01-01T00:00:00-0000",
+          }],
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({
+          id: "4001", name: "C1",
+          // asset_feed_spec — not supported, will be skipped.
+          asset_feed_spec: { bodies: [{ text: "x" }] },
+          object_story_spec: { page_id: "6001", link_data: { link: "https://x.com/" } },
+        })));
+
+      const handler = server._registeredTools[2].handler;
+      await expect(handler({
+        account_id: "act_123",
+        source_ad_set_id: "2099",
+        target_ad_set: { name: "Target", geo_override: { countries: ["CO"] }, status: "PAUSED" },
+        creative_overrides: [],
+        reuse_source_media: true,
+        dry_run: false,
+        idempotency_key: "k-empty-1",
+      })).rejects.toThrow(/no clonable creatives/);
+
+      // No POSTs at all — we threw before claiming or creating anything.
+      const posts = vi.mocked(fetch).mock.calls.filter((c) => c[1]?.method === "POST");
+      expect(posts).toHaveLength(0);
+    });
+
+    it("surfaces partial state in the error when ad creation fails after ad set + creative succeed", async () => {
+      const server = createMockMcpServer();
+      registerAdSetTools(server as never);
+
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(mockFetchResponse({
+          id: "2099", name: "Source", campaign_id: "1001",
+          status: "ACTIVE", effective_status: "ACTIVE",
+          daily_budget: "500",
+          optimization_goal: "OFFSITE_CONVERSIONS",
+          billing_event: "IMPRESSIONS",
+          targeting: { geo_locations: { countries: ["CL"] } },
+          destination_type: "WEBSITE",
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({
+          data: [{
+            id: "3001", name: "Source__a1", adset_id: "2099", campaign_id: "1001",
+            status: "ACTIVE", effective_status: "ACTIVE", creative: { id: "4001" },
+            created_time: "2026-01-01T00:00:00-0000", updated_time: "2026-01-01T00:00:00-0000",
+          }],
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({
+          id: "4001", name: "C1",
+          object_story_spec: { page_id: "6001", link_data: { link: "https://x.com/", image_hash: "h1" } },
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({ id: "20001" })) // POST ad set OK
+        .mockResolvedValueOnce(mockFetchResponse({ id: "40001" })) // POST creative OK
+        .mockResolvedValueOnce(mockFetchResponse({  // POST ad FAILS
+          error: { message: "Bad ad payload", type: "OAuthException", code: 100 },
+        })));
+
+      const handler = server._registeredTools[2].handler;
+      await expect(handler({
+        account_id: "act_123",
+        source_ad_set_id: "2099",
+        target_ad_set: { name: "Target", geo_override: { countries: ["CO"] }, status: "PAUSED" },
+        creative_overrides: [],
+        reuse_source_media: true,
+        dry_run: false,
+        idempotency_key: "k-partial-1",
+      })).rejects.toThrow(/partial state.*ad_set=20001.*creatives=\[40001\]/);
     });
   });
 

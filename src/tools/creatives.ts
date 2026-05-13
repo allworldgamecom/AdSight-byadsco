@@ -12,7 +12,7 @@ import { assertSafePublicUrl, UnsafeUrlError } from "../utils/url-guard.js";
 import { downloadSafePublicImage } from "../utils/safe-download.js";
 import { READ, CREATE, UPDATE, UPLOAD, WRITE_WARNING } from "./_register.js";
 
-const ctaEnum = z.enum([
+export const ctaEnum = z.enum([
   // Core actions
   "LEARN_MORE", "SIGN_UP", "DOWNLOAD", "SUBSCRIBE", "CONTACT_US",
   "APPLY_NOW", "GET_OFFER", "GET_QUOTE", "GET_STARTED", "OPEN_LINK",
@@ -274,7 +274,7 @@ export function registerCreativeTools(server: McpServer): void {
         }
 
         if (instagramActorIdValidated) {
-          objectStorySpec.instagram_actor_id = instagramActorIdValidated;
+          objectStorySpec.instagram_user_id = instagramActorIdValidated;
         }
 
         body.object_story_spec = JSON.stringify(objectStorySpec);

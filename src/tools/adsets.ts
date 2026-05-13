@@ -8,6 +8,8 @@ import { AD_DEFAULT_FIELDS } from "../meta/types/ad.js";
 import { CREATIVE_DEFAULT_FIELDS } from "../meta/types/creative.js";
 import type { Ad, AdCreative, AdSet, GeoLocation, MetaApiResponse, TargetingSpec } from "../meta/types/index.js";
 import { READ, CREATE, UPDATE, DELETE, WRITE_WARNING } from "./_register.js";
+import { getCloneBundleStore } from "../store/clone-bundle-store.js";
+import { ctaEnum } from "./creatives.js";
 
 const statusEnum = z.enum(["ACTIVE", "PAUSED", "DELETED", "ARCHIVED"]);
 
@@ -122,10 +124,11 @@ const adSetIdentityFields = ["id", "name", "campaign_id", "status", "effective_s
 
 const cloneTargetAdSetSchema = z.object({
   name: z.string().min(1).describe("Name for the cloned ad set"),
-  geo_override: geoLocationSchema.describe("Geo override applied on top of the source targeting (for example, { countries: ['CL'] })"),
+  geo_override: geoLocationSchema.describe("Geo override that REPLACES the source geo_locations (for example, { countries: ['CL'] }). Cities/regions/zips from the source are NOT inherited."),
   status: z.enum(["ACTIVE", "PAUSED"]).default("PAUSED").describe("Status for the cloned ad set and ads. Defaults to PAUSED."),
-  daily_budget: z.number().optional().describe("Optional daily budget override in cents"),
-  lifetime_budget: z.number().optional().describe("Optional lifetime budget override in cents"),
+  daily_budget: z.number().optional().describe("Optional daily budget override in cents. Takes precedence over the source budget, regardless of source budget type."),
+  lifetime_budget: z.number().optional().describe("Optional lifetime budget override in cents. Requires end_time."),
+  end_time: z.string().optional().describe("ISO 8601 end time. Required when lifetime_budget is set."),
   destination_type: destinationTypeEnum.optional().describe("Optional destination_type override"),
   promoted_object: z.record(z.unknown()).optional().describe("Optional promoted_object override"),
 });
@@ -138,7 +141,7 @@ const creativeOverrideSchema = z.object({
   message: z.string().optional().describe("Primary text override"),
   description: z.string().optional().describe("Description override"),
   link_url: z.string().optional().describe("Optional destination URL override"),
-  call_to_action_type: z.string().optional().describe("Optional CTA override"),
+  call_to_action_type: ctaEnum.optional().describe("Optional CTA override"),
 }).refine(
   (value) => Boolean(value.source_ad_id || value.source_creative_id),
   "Each creative override must include source_ad_id or source_creative_id.",
@@ -184,15 +187,10 @@ interface CloneAdSetBundleResult {
   warnings: string[];
 }
 
-interface CachedCloneBundleOperation {
-  signature: string;
-  result: CloneAdSetBundleResult;
-}
-
 interface ResolvedCloneCreativeInput {
   name: string;
   page_id: string;
-  instagram_actor_id?: string;
+  instagram_user_id?: string;
   image_hash?: string;
   image_url?: string;
   video_id?: string;
@@ -202,8 +200,6 @@ interface ResolvedCloneCreativeInput {
   description?: string;
   call_to_action_type?: string;
 }
-
-const cloneAdSetBundleCache = new Map<string, CachedCloneBundleOperation>();
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null ? value as Record<string, unknown> : undefined;
@@ -246,17 +242,27 @@ function buildAdSetDetailsFields(fields?: string[]): string {
   const requested =
     fields && fields.length > 0
       ? [...new Set([...adSetIdentityFields, ...fields])]
-      : [...ADSET_DEFAULT_FIELDS, "frequency_control_specs", "promoted_object", "destination_type"];
+      : [...new Set([...ADSET_DEFAULT_FIELDS, "frequency_control_specs", "promoted_object", "destination_type"])];
 
   return buildFieldsParam(requested, requested);
 }
 
+const TARGETING_READ_ONLY_FIELDS = [
+  "targeting_relaxation_types",
+  "is_whatsapp_destination_ad",
+  "targeting_optimization",
+] as const;
+
 function applyGeoOverride(targeting: TargetingSpec | undefined, geoOverride: GeoLocation): TargetingSpec {
   const nextTargeting = structuredClone(targeting ?? {}) as TargetingSpec;
-  nextTargeting.geo_locations = {
-    ...(nextTargeting.geo_locations ?? {}),
-    ...geoOverride,
-  };
+  // Replace, do NOT merge. Inheriting cities/regions/zips from the source
+  // when changing countries produces nonsensical targeting (e.g., "Colombia
+  // + Santiago, Chile"). Meta's own docs recommend redefining geo_locations
+  // when swapping country.
+  nextTargeting.geo_locations = { ...geoOverride };
+  for (const field of TARGETING_READ_ONLY_FIELDS) {
+    delete nextTargeting[field];
+  }
   return nextTargeting;
 }
 
@@ -291,11 +297,20 @@ function resolveCreativeCloneInput(
     return { reason: "reuse_source_media=false todavía no está soportado para clonado automático." };
   }
 
+  // Reject asset_feed_spec FIRST. A dynamic creative that also happens to have
+  // a video_data/link_data shape would otherwise silently be cloned as a
+  // static creative, losing the feed entirely.
+  if (sourceCreative.asset_feed_spec) {
+    return { reason: "El creative fuente usa asset_feed_spec y esa variante aún no está soportada por ads_clone_ad_set_bundle." };
+  }
+
   const objectStorySpec = asRecord(sourceCreative.object_story_spec);
   const videoData = asRecord(objectStorySpec?.["video_data"]);
   const linkData = asRecord(objectStorySpec?.["link_data"]);
   const pageId = getString(objectStorySpec, "page_id");
-  const instagramActorId = getString(objectStorySpec, "instagram_actor_id");
+  const instagramUserId =
+    getString(objectStorySpec, "instagram_user_id")
+    ?? getString(objectStorySpec, "instagram_actor_id");
   const effectiveLinkUrl = override?.link_url ?? extractEffectiveCreativeLinkUrl(sourceCreative);
   const defaultName =
     override?.name
@@ -322,7 +337,7 @@ function resolveCreativeCloneInput(
       input: {
         name: defaultName,
         page_id: pageId,
-        instagram_actor_id: instagramActorId,
+        instagram_user_id: instagramUserId,
         video_id: videoId,
         image_hash: imageHash,
         image_url: imageHash ? undefined : imageUrl,
@@ -343,7 +358,7 @@ function resolveCreativeCloneInput(
       input: {
         name: defaultName,
         page_id: pageId,
-        instagram_actor_id: instagramActorId,
+        instagram_user_id: instagramUserId,
         image_hash: getString(linkData, "image_hash") ?? sourceCreative.image_hash,
         image_url: getString(linkData, "picture") ?? sourceCreative.image_url,
         link_url: effectiveLinkUrl,
@@ -356,10 +371,6 @@ function resolveCreativeCloneInput(
           ?? sourceCreative.call_to_action_type,
       },
     };
-  }
-
-  if (sourceCreative.asset_feed_spec) {
-    return { reason: "El creative fuente usa asset_feed_spec y esa variante aún no está soportada por ads_clone_ad_set_bundle." };
   }
 
   return { reason: "No se pudo resolver una estructura clonable de object_story_spec en el creative fuente." };
@@ -482,20 +493,34 @@ export function registerAdSetTools(server: McpServer): void {
       const cacheKey = idempotency_key
         ? `${idempotency_key}:${accountPath}:${sourceAdSetIdValidated}:${target_ad_set.name}`
         : undefined;
+      const store = getCloneBundleStore();
 
-      if (cacheKey) {
-        const cached = cloneAdSetBundleCache.get(cacheKey);
-        if (cached) {
-          if (cached.signature !== requestSignature) {
+      if (cacheKey && !dry_run) {
+        const existing = await store.getDoc(cacheKey);
+        if (existing) {
+          if (existing.signature !== requestSignature) {
             throw new Error("idempotency_key already exists for a different ads_clone_ad_set_bundle payload.");
           }
-
-          return {
-            content: [
-              { type: "text", text: `ads_clone_ad_set_bundle reused cached result for key ${idempotency_key}.` },
-              { type: "text", text: JSON.stringify(cached.result, null, 2) },
-            ],
-          };
+          if (existing.state === "completed" && existing.result) {
+            return {
+              content: [
+                { type: "text", text: `ads_clone_ad_set_bundle reused cached result for key ${idempotency_key}.` },
+                { type: "text", text: JSON.stringify(existing.result, null, 2) },
+              ],
+            };
+          }
+          if (existing.state === "in_progress") {
+            throw new Error(`ads_clone_ad_set_bundle is already in progress for idempotency_key ${idempotency_key} (started ${new Date(existing.startedAt).toISOString()}). Wait for completion or use a different key.`);
+          }
+          if (existing.state === "failed") {
+            const created = existing.createdResources;
+            const orphans = [
+              created.adSetId ? `ad_set=${created.adSetId}` : undefined,
+              created.creativeIds.length ? `creatives=[${created.creativeIds.join(",")}]` : undefined,
+              created.adIds.length ? `ads=[${created.adIds.join(",")}]` : undefined,
+            ].filter(Boolean).join(", ");
+            throw new Error(`Previous ads_clone_ad_set_bundle run with idempotency_key ${idempotency_key} failed. Partial resources created: ${orphans || "none"}. Error: ${existing.lastError ?? "unknown"}. Clean up these resources manually (or with ads_delete_*) and retry with a new idempotency_key.`);
+          }
         }
       }
 
@@ -508,13 +533,11 @@ export function registerAdSetTools(server: McpServer): void {
         throw new Error("Source ad set is missing optimization_goal or billing_event and cannot be cloned safely.");
       }
 
-      if (
-        target_ad_set.daily_budget === undefined
-        && target_ad_set.lifetime_budget === undefined
-        && sourceAdSet.daily_budget === undefined
-        && sourceAdSet.lifetime_budget === undefined
-      ) {
-        throw new Error("Source ad set has no ad-set-level budget. Provide target_ad_set.daily_budget or target_ad_set.lifetime_budget.");
+      // Note: when both source and target have no budget, we assume the parent
+      // campaign uses CBO (Campaign Budget Optimization). Meta will reject the
+      // create call if that assumption is wrong, with a clear error.
+      if (target_ad_set.lifetime_budget !== undefined && !target_ad_set.end_time) {
+        throw new Error("target_ad_set.lifetime_budget requires target_ad_set.end_time.");
       }
 
       const adsFieldsParam = buildFieldsParam(undefined, [...AD_DEFAULT_FIELDS, "tracking_specs"]);
@@ -624,34 +647,92 @@ export function registerAdSetTools(server: McpServer): void {
         };
       }
 
-      const accountNodeId = normalizeAccountId(account_id);
+      if (resolvedCreativePlans.length === 0) {
+        throw new Error(`ads_clone_ad_set_bundle: no clonable creatives in source ad set ${sourceAdSetIdValidated}. Skipped: ${JSON.stringify(skipped)}`);
+      }
+
+      if (cacheKey) {
+        const claim = await store.claim(cacheKey, requestSignature);
+        if (claim.status === "duplicate") {
+          const existing = claim.existing!;
+          if (existing.signature !== requestSignature) {
+            throw new Error("idempotency_key already exists for a different ads_clone_ad_set_bundle payload.");
+          }
+          if (existing.state === "completed" && existing.result) {
+            return {
+              content: [
+                { type: "text", text: `ads_clone_ad_set_bundle reused cached result for key ${idempotency_key}.` },
+                { type: "text", text: JSON.stringify(existing.result, null, 2) },
+              ],
+            };
+          }
+          throw new Error(`ads_clone_ad_set_bundle: concurrent execution detected for idempotency_key ${idempotency_key}.`);
+        }
+      }
+
+      const createdResources = { adSetId: undefined as string | undefined, creativeIds: [] as string[], adIds: [] as string[] };
+      const markFailed = async (error: unknown): Promise<void> => {
+        if (!cacheKey) return;
+        try {
+          await store.update(cacheKey, {
+            state: "failed",
+            lastError: error instanceof Error ? error.message : String(error),
+            createdResources,
+          });
+        } catch (storeErr) {
+          // best-effort; do not mask the original error
+          void storeErr;
+        }
+      };
+
       const createAdSetBody: Record<string, string | number | boolean> = {
         campaign_id: sourceAdSet.campaign_id,
         name: target_ad_set.name,
-        destination_type: target_ad_set.destination_type ?? sourceAdSet.destination_type ?? "WEBSITE",
         status: targetStatus,
         optimization_goal: sourceAdSet.optimization_goal,
         billing_event: sourceAdSet.billing_event,
         targeting: JSON.stringify(clonedTargeting),
       };
+      const resolvedDestinationType = target_ad_set.destination_type ?? sourceAdSet.destination_type;
+      if (resolvedDestinationType) createAdSetBody.destination_type = resolvedDestinationType;
 
-      const resolvedLifetimeBudget = target_ad_set.lifetime_budget ?? (sourceAdSet.lifetime_budget ? Number(sourceAdSet.lifetime_budget) : undefined);
-      const resolvedDailyBudget =
-        resolvedLifetimeBudget === undefined
-          ? target_ad_set.daily_budget ?? (sourceAdSet.daily_budget ? Number(sourceAdSet.daily_budget) : undefined)
-          : undefined;
+      // Budget resolution: user-provided overrides win regardless of source
+      // budget shape. Only fall back to source when the user provides neither.
+      // If both source and user provide nothing, leave both unset (CBO case).
+      let resolvedDailyBudget: number | undefined;
+      let resolvedLifetimeBudget: number | undefined;
+      let resolvedEndTime: string | undefined;
+      if (target_ad_set.lifetime_budget !== undefined) {
+        resolvedLifetimeBudget = target_ad_set.lifetime_budget;
+        resolvedEndTime = target_ad_set.end_time;
+      } else if (target_ad_set.daily_budget !== undefined) {
+        resolvedDailyBudget = target_ad_set.daily_budget;
+      } else if (sourceAdSet.lifetime_budget) {
+        resolvedLifetimeBudget = Number(sourceAdSet.lifetime_budget);
+        resolvedEndTime = sourceAdSet.end_time;
+      } else if (sourceAdSet.daily_budget) {
+        resolvedDailyBudget = Number(sourceAdSet.daily_budget);
+      }
 
       if (resolvedLifetimeBudget !== undefined) createAdSetBody.lifetime_budget = String(resolvedLifetimeBudget);
       if (resolvedDailyBudget !== undefined) createAdSetBody.daily_budget = String(resolvedDailyBudget);
       if (sourceAdSet.bid_amount !== undefined) createAdSetBody.bid_amount = sourceAdSet.bid_amount;
       if (sourceAdSet.bid_strategy) createAdSetBody.bid_strategy = sourceAdSet.bid_strategy;
       if (sourceAdSet.start_time) createAdSetBody.start_time = sourceAdSet.start_time;
-      if (sourceAdSet.end_time && resolvedLifetimeBudget !== undefined) createAdSetBody.end_time = sourceAdSet.end_time;
+      if (resolvedEndTime && resolvedLifetimeBudget !== undefined) createAdSetBody.end_time = resolvedEndTime;
 
       const promotedObject = target_ad_set.promoted_object ?? sourceAdSet.promoted_object;
       if (promotedObject) createAdSetBody.promoted_object = JSON.stringify(promotedObject);
 
-      const newAdSet = await metaApiClient.postForm<{ id: string }>(`/${accountNodeId}/adsets`, createAdSetBody);
+      let newAdSet: { id: string };
+      try {
+        newAdSet = await metaApiClient.postForm<{ id: string }>(`/${accountPath}/adsets`, createAdSetBody);
+      } catch (err) {
+        await markFailed(err);
+        throw err;
+      }
+      createdResources.adSetId = newAdSet.id;
+      if (cacheKey) await store.update(cacheKey, { createdResources });
       result.new_ad_set = {
         id: newAdSet.id,
         name: target_ad_set.name,
@@ -664,7 +745,7 @@ export function registerAdSetTools(server: McpServer): void {
           name: plan.input.name,
           object_story_spec: JSON.stringify({
             page_id: plan.input.page_id,
-            ...(plan.input.instagram_actor_id ? { instagram_actor_id: plan.input.instagram_actor_id } : {}),
+            ...(plan.input.instagram_user_id ? { instagram_user_id: plan.input.instagram_user_id } : {}),
             ...(plan.input.video_id
               ? {
                   video_data: {
@@ -709,10 +790,18 @@ export function registerAdSetTools(server: McpServer): void {
           }),
         };
 
-        const createdCreative = await metaApiClient.postForm<{ id: string }>(
-          `/${accountNodeId}/adcreatives`,
-          creativeBody,
-        );
+        let createdCreative: { id: string };
+        try {
+          createdCreative = await metaApiClient.postForm<{ id: string }>(
+            `/${accountPath}/adcreatives`,
+            creativeBody,
+          );
+        } catch (err) {
+          await markFailed(err);
+          throw new Error(`${err instanceof Error ? err.message : String(err)} (partial state: ad_set=${createdResources.adSetId}, creatives=[${createdResources.creativeIds.join(",")}], ads=[${createdResources.adIds.join(",")}])`);
+        }
+        createdResources.creativeIds.push(createdCreative.id);
+        if (cacheKey) await store.update(cacheKey, { createdResources });
 
         result.created_creatives.push({
           id: createdCreative.id,
@@ -734,7 +823,15 @@ export function registerAdSetTools(server: McpServer): void {
           adBody.tracking_specs = JSON.stringify(plan.sourceAd.tracking_specs);
         }
 
-        const createdAd = await metaApiClient.postForm<{ id: string }>(`/${accountNodeId}/ads`, adBody);
+        let createdAd: { id: string };
+        try {
+          createdAd = await metaApiClient.postForm<{ id: string }>(`/${accountPath}/ads`, adBody);
+        } catch (err) {
+          await markFailed(err);
+          throw new Error(`${err instanceof Error ? err.message : String(err)} (partial state: ad_set=${createdResources.adSetId}, creatives=[${createdResources.creativeIds.join(",")}], ads=[${createdResources.adIds.join(",")}])`);
+        }
+        createdResources.adIds.push(createdAd.id);
+        if (cacheKey) await store.update(cacheKey, { createdResources });
         result.created_ads.push({
           id: createdAd.id,
           name: clonedAdName,
@@ -746,7 +843,11 @@ export function registerAdSetTools(server: McpServer): void {
       }
 
       if (cacheKey) {
-        cloneAdSetBundleCache.set(cacheKey, { signature: requestSignature, result });
+        await store.update(cacheKey, {
+          state: "completed",
+          completedAt: Date.now(),
+          result,
+        });
       }
 
       return {
