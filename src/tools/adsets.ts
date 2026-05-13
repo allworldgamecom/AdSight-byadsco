@@ -8,7 +8,7 @@ import { AD_DEFAULT_FIELDS } from "../meta/types/ad.js";
 import { CREATIVE_DEFAULT_FIELDS } from "../meta/types/creative.js";
 import type { Ad, AdCreative, AdSet, GeoLocation, MetaApiResponse, TargetingSpec } from "../meta/types/index.js";
 import { READ, CREATE, UPDATE, DELETE, WRITE_WARNING } from "./_register.js";
-import { getCloneBundleStore } from "../store/clone-bundle-store.js";
+import { getCloneBundleStore, STALE_IN_PROGRESS_MS } from "../store/clone-bundle-store.js";
 import { ctaEnum } from "./creatives.js";
 
 const statusEnum = z.enum(["ACTIVE", "PAUSED", "DELETED", "ARCHIVED"]);
@@ -510,7 +510,13 @@ export function registerAdSetTools(server: McpServer): void {
             };
           }
           if (existing.state === "in_progress") {
-            throw new Error(`ads_clone_ad_set_bundle is already in progress for idempotency_key ${idempotency_key} (started ${new Date(existing.startedAt).toISOString()}). Wait for completion or use a different key.`);
+            const lockAgeMs = Date.now() - existing.startedAt;
+            if (lockAgeMs <= STALE_IN_PROGRESS_MS) {
+              throw new Error(`ads_clone_ad_set_bundle is already in progress for idempotency_key ${idempotency_key} (started ${new Date(existing.startedAt).toISOString()}). Wait for completion or use a different key.`);
+            }
+            // Stale lock (>STALE_IN_PROGRESS_MS) — fall through to store.claim()
+            // which takes over the stale entry. This handles the crash-between-
+            // claim-and-markFailed case so users aren't blocked permanently.
           }
           if (existing.state === "failed") {
             const created = existing.createdResources;

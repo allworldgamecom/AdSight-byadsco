@@ -20,7 +20,7 @@ export interface CloneBundleRecord {
 }
 
 const COLLECTION = "clone_bundle_operations";
-const STALE_IN_PROGRESS_MS = 15 * 60 * 1000;
+export const STALE_IN_PROGRESS_MS = 15 * 60 * 1000;
 
 class InMemoryStore {
   private readonly map = new Map<string, CloneBundleRecord>();

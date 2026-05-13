@@ -598,6 +598,70 @@ describe("registerAdSetTools", () => {
       expect(posts).toHaveLength(0);
     });
 
+    it("reclaims a stale in_progress lock instead of blocking retries forever", async () => {
+      // Simulate a previous crash: the store has an in_progress doc older than
+      // STALE_IN_PROGRESS_MS for the same key. The retry must take over the
+      // stale lock and proceed, not throw "already in progress".
+      const { getCloneBundleStore, STALE_IN_PROGRESS_MS } = await import("../../src/store/clone-bundle-store.js");
+      const store = getCloneBundleStore();
+      const staleKey = "k-stale-1:act_123:2099:Target";
+      await store.claim(staleKey, JSON.stringify({
+        account_id: "act_123",
+        source_ad_set_id: "2099",
+        target_ad_set: {
+          name: "Target",
+          geo_override: { countries: ["CO"] },
+          status: "PAUSED",
+        },
+        creative_overrides: [],
+        reuse_source_media: true,
+      }));
+      // Backdate startedAt so the lock is stale.
+      await store.update(staleKey, { startedAt: Date.now() - STALE_IN_PROGRESS_MS - 1000 });
+
+      const server = createMockMcpServer();
+      registerAdSetTools(server as never);
+
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(mockFetchResponse({
+          id: "2099", name: "Source", campaign_id: "1001",
+          status: "ACTIVE", effective_status: "ACTIVE",
+          daily_budget: "500",
+          optimization_goal: "OFFSITE_CONVERSIONS",
+          billing_event: "IMPRESSIONS",
+          targeting: { geo_locations: { countries: ["CL"] } },
+          destination_type: "WEBSITE",
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({
+          data: [{
+            id: "3001", name: "Source__a1", adset_id: "2099", campaign_id: "1001",
+            status: "ACTIVE", effective_status: "ACTIVE", creative: { id: "4001" },
+            created_time: "2026-01-01T00:00:00-0000", updated_time: "2026-01-01T00:00:00-0000",
+          }],
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({
+          id: "4001", name: "C1",
+          object_story_spec: { page_id: "6001", link_data: { link: "https://x.com/", image_hash: "h1" } },
+        }))
+        .mockResolvedValueOnce(mockFetchResponse({ id: "20002" }))
+        .mockResolvedValueOnce(mockFetchResponse({ id: "40002" }))
+        .mockResolvedValueOnce(mockFetchResponse({ id: "30002" })));
+
+      const handler = server._registeredTools[2].handler;
+      const result = await handler({
+        account_id: "act_123",
+        source_ad_set_id: "2099",
+        target_ad_set: { name: "Target", geo_override: { countries: ["CO"] }, status: "PAUSED" },
+        creative_overrides: [],
+        reuse_source_media: true,
+        dry_run: false,
+        idempotency_key: "k-stale-1",
+      }) as { content: Array<{ type: string; text: string }> };
+
+      const payload = JSON.parse(result.content[1].text) as { new_ad_set: { id?: string } };
+      expect(payload.new_ad_set.id).toBe("20002");
+    });
+
     it("surfaces partial state in the error when ad creation fails after ad set + creative succeed", async () => {
       const server = createMockMcpServer();
       registerAdSetTools(server as never);
