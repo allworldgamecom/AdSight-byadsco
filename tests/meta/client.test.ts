@@ -278,6 +278,61 @@ describe("MetaApiClient", () => {
       expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
     });
 
+    it("does NOT retry POST to account-scoped collection paths on 5xx (idempotency safety)", async () => {
+      const retryClient = new MetaApiClient({
+        maxRetries: 3,
+        timeout: 5000,
+      });
+
+      const serverErrorResponse = mockFetchResponse(
+        {
+          error: {
+            message: "Server error",
+            type: "API_ERROR",
+            code: 1,
+          },
+        },
+      );
+
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(serverErrorResponse));
+
+      await expect(retryClient.postForm("/act_123/adsets", { name: "x" })).rejects.toThrow();
+      // POST to /act_*/adsets is a CREATE — must not retry, even on retryable
+      // errors, because Meta has no native idempotency and a successful create
+      // followed by a response-side failure would mint a duplicate on retry.
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    });
+
+    it("still retries POST to non-account-scoped paths (updates are idempotent)", async () => {
+      const retryClient = new MetaApiClient({
+        maxRetries: 1,
+        timeout: 5000,
+      });
+
+      const serverErrorResponse = mockFetchResponse(
+        {
+          error: {
+            message: "Server error",
+            type: "API_ERROR",
+            code: 1,
+          },
+        },
+      );
+      const successResponse = mockFetchResponse({ success: true });
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn()
+          .mockResolvedValueOnce(serverErrorResponse)
+          .mockResolvedValueOnce(successResponse),
+      );
+
+      // POST /<adset_id> is an UPDATE — idempotent, safe to retry.
+      const result = await retryClient.postForm("/1234567890", { name: "x" });
+      expect(result).toEqual({ success: true });
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+    });
+
     it("does not retry auth errors", async () => {
       const retryClient = new MetaApiClient({
         maxRetries: 2,

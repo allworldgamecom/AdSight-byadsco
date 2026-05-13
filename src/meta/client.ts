@@ -188,6 +188,14 @@ export class MetaApiClient {
 
     const reqUrl = skipTokenParam ? url : this.appendToken(url, token);
 
+    // POST to /act_<id>/<collection> creates new resources without native
+    // idempotency on Meta's side — retrying a timeout/5xx/network error can
+    // mint duplicates (e.g. two ad sets for one user intent). Other POSTs
+    // (updates on /<id>) and DELETEs are idempotent at the API level.
+    const isCreatingRequest =
+      method === "POST" && /^\/?act_[A-Za-z0-9]+\//.test(path);
+    const canRetryTransport = !isCreatingRequest;
+
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
@@ -234,7 +242,7 @@ export class MetaApiClient {
             throw classification.mcpError;
           }
 
-          if (classification.retryable && attempt < this.maxRetries) {
+          if (classification.retryable && canRetryTransport && attempt < this.maxRetries) {
             lastError = classification.mcpError;
             await this.backoff(attempt);
             continue;
@@ -247,7 +255,7 @@ export class MetaApiClient {
           lastError = new Error(
             `HTTP ${response.status}: ${JSON.stringify(body)}`,
           );
-          if (response.status >= 500 && attempt < this.maxRetries) {
+          if (response.status >= 500 && canRetryTransport && attempt < this.maxRetries) {
             await this.backoff(attempt);
             continue;
           }
@@ -258,10 +266,11 @@ export class MetaApiClient {
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
           lastError = new Error(`Request timeout after ${this.timeout}ms`);
-          if (attempt < this.maxRetries) {
+          if (canRetryTransport && attempt < this.maxRetries) {
             await this.backoff(attempt);
             continue;
           }
+          throw lastError;
         }
 
         // Already-classified errors bubble up unchanged.
@@ -270,10 +279,11 @@ export class MetaApiClient {
         }
 
         lastError = error instanceof Error ? error : new Error(String(error));
-        if (attempt < this.maxRetries) {
+        if (canRetryTransport && attempt < this.maxRetries) {
           await this.backoff(attempt);
           continue;
         }
+        throw lastError;
       }
     }
 
