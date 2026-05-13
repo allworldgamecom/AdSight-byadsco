@@ -5,6 +5,68 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] — 2026-05-13
+
+Audit-driven fixes for `ads_clone_ad_set_bundle` after Meta API error
+2500 surfaced a duplicate `destination_type` in the GET fields list.
+Verified against Marketing API v25 docs and an independent code review.
+
+### Fixed
+
+- **v22 compat**: `instagram_actor_id` removed from
+  `AdCreativeObjectStorySpec` (deprecated in v22.0 changelog). The bundle
+  now reads `instagram_user_id` with a fallback for legacy creatives and
+  always writes the new field. Also applied in `ads_create_ad_creative`.
+- **Write safety**: `MetaApiClient` no longer retries `POST` to
+  `/act_*/<collection>` paths on timeout/5xx/transient errors. Meta has no
+  native idempotency on creates, so the prior retry behavior could mint
+  duplicate ad sets/creatives/ads within a single tool invocation.
+  `POST /<id>` (updates) and `DELETE` are unaffected.
+- **Targeting roundtrip**: strip read-only fields
+  (`targeting_relaxation_types`, `is_whatsapp_destination_ad`,
+  `targeting_optimization`) returned by Meta on GET before sending the
+  targeting back on POST.
+- **Geo override**: `applyGeoOverride` now replaces `geo_locations`
+  instead of merging. Previously a Chile-source with city targeting cloned
+  to Colombia would inherit Chilean cities — Meta's docs recommend
+  redefining `geo_locations` on country swaps.
+- **Budget priority**: user-provided `target_ad_set.daily_budget` or
+  `lifetime_budget` now wins over the source budget regardless of source
+  shape. Previously a daily-budget override was silently dropped when the
+  source had a lifetime budget.
+- **Empty bundle**: throws before claiming idempotency when no source
+  creatives are clonable, instead of creating an empty ad set.
+- **`asset_feed_spec` order**: the unsupported-feed check now runs before
+  the video/link checks, so dynamic creatives that also expose a
+  `link_data` shape aren't silently cloned as static.
+- **Hard-coded `WEBSITE` fallback** removed for `destination_type` —
+  source value (or user override) is used, otherwise omitted.
+
+### Changed
+
+- **Idempotency cache**: moved from an in-process `Map` to a
+  Firestore-backed store (`clone_bundle_operations` collection). Survives
+  Cloud Run restarts and multi-instance deployments. Falls back to in-
+  memory when Firestore env vars are not set.
+- **Partial-failure tracking**: the store records created resources
+  incrementally; if a step fails, the error surfaces the partial state
+  (`ad_set=…, creatives=[…], ads=[…]`) and the run is marked `failed`.
+  Retries with the same `idempotency_key` are rejected with the orphan
+  list until the user cleans up.
+- **Stale lock reclaim**: `in_progress` records older than 15 minutes
+  (e.g. orphaned by a process crash between `claim` and `markFailed`) are
+  taken over on retry instead of blocking forever.
+- **CTA validation**: `creative_overrides.call_to_action_type` is now
+  validated against the shared `ctaEnum` — typos are rejected at schema
+  time instead of after creating the ad set.
+
+### Added
+
+- `target_ad_set.end_time` on `ads_clone_ad_set_bundle` (required when
+  the user provides `lifetime_budget`).
+- CBO support: bundle no longer requires source-level budget when the
+  parent campaign uses Campaign Budget Optimization.
+
 ## [3.0.0] — 2026-05-06
 
 ### Why this release
