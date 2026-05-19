@@ -49,15 +49,28 @@ jobs:
 
   secret-scan:
     name: gitleaks (secret scan)
+    # Required check: the job must always run so it can report a
+    # status. Skip only the inner steps for fork PRs, where GitHub
+    # withholds org secrets (GITLEAKS_LICENSE) and gitleaks-action
+    # aborts before scanning. Push to main and PRs from internal
+    # branches scan normally. Fork contributions are still covered
+    # by maintainers running pre-deploy-guard locally on the
+    # merged result.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Skip notice (fork PR)
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: echo "Skipping gitleaks scan — PR from fork (org secrets unavailable). Push to main will re-scan."
+
       - name: Checkout
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           fetch-depth: 0
 
       - name: Run gitleaks
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
