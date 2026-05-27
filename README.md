@@ -111,7 +111,7 @@ All tools use the `ads_*` naming convention, aligned with Meta's official MCP se
 | Targeting | 7 | Interest / behavior / demographic / geo search, audience estimation, targeting description |
 | Budget | 1 | Budget schedule management |
 | Leads | 4 | Lead forms and lead retrieval |
-| Audiences | 5 | Custom audiences and lookalikes |
+| Audiences | 8 | Custom audiences, lookalikes, and cross-account sharing |
 | Previews | 2 | Ad previews before launch |
 | Pixels | 5 | Pixel details, events, custom conversions |
 | Comments | 4 | Ad comment moderation |
@@ -321,6 +321,9 @@ A typical agency workflow: build a CRM-derived seed audience, expand it into a l
 | `ads_get_audience_details` | [src/tools/audiences.ts](src/tools/audiences.ts) | Inspect one audience: subtype, retention, size estimate. |
 | `ads_create_custom_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Create CUSTOM / WEBSITE / APP / OFFLINE_CONVERSION / ENGAGEMENT subtypes. |
 | `ads_create_lookalike_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Build a lookalike (1 %–20 %) from a seed audience + country. |
+| `ads_share_custom_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Share an audience with one or more ad accounts in the same Business Manager. |
+| `ads_unshare_custom_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Revoke the share from one or more ad accounts. |
+| `ads_get_audience_shared_accounts` | [src/tools/audiences.ts](src/tools/audiences.ts) | List which ad accounts currently have shared access to an audience. |
 | `ads_delete_custom_audience` | [src/tools/audiences.ts](src/tools/audiences.ts) | Permanent delete; cannot be undone. |
 | `ads_estimate_audience_size` | [src/tools/targeting.ts](src/tools/targeting.ts) | Get reach estimate before pushing the audience to an ad set. |
 | `ads_update_ad_set` | [src/tools/adsets.ts](src/tools/adsets.ts) | **Apply** the audience by writing to `targeting.custom_audiences`. |

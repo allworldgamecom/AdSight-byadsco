@@ -5,7 +5,7 @@ import { normalizeAccountId, validateMetaId } from "../utils/format.js";
 import { buildFieldsParam } from "../utils/validation.js";
 import { AUDIENCE_DEFAULT_FIELDS } from "../meta/types/audience.js";
 import type { CustomAudience, MetaApiResponse } from "../meta/types/index.js";
-import { READ, CREATE, DELETE, WRITE_WARNING } from "./_register.js";
+import { READ, CREATE, UPDATE, DELETE, WRITE_WARNING } from "./_register.js";
 
 export function registerAudienceTools(server: McpServer): void {
   // ─── Get Custom Audiences ─────────────────────────────────────
@@ -197,6 +197,150 @@ export function registerAudienceTools(server: McpServer): void {
             type: "text",
             text: `Lookalike audience created!\nID: ${result.id}\nName: ${name}\nSource: ${originAudienceIdValidated}\nRatio: ${(ratio * 100).toFixed(0)}%\nCountry: ${country}`,
           },
+        ],
+      };
+    },
+  );
+
+  // ─── Share Custom Audience ────────────────────────────────────
+  server.registerTool(
+    "ads_share_custom_audience",
+    {
+      description: `${WRITE_WARNING}Share a custom audience with one or more ad accounts under the same Business Manager. Both source and target accounts must belong to the same BM and the caller needs ads_management on each. Shareable subtypes: CUSTOM, LOOKALIKE, WEBSITE (engagement/offline-conversion audiences cannot be shared — Meta returns code 2655). Re-sharing with the same account is a no-op. After sharing, the target account can target the audience via ads_update_ad_set (targeting.custom_audiences=[{id}]).`,
+      inputSchema: {
+        audience_id: z.string().describe("Custom audience ID to share"),
+        ad_account_ids: z
+          .array(z.string())
+          .min(1)
+          .describe(
+            "Target ad account IDs (numeric or act_<id>). Must be in the same Business Manager as the audience owner.",
+          ),
+        relationship_type: z
+          .array(z.string())
+          .optional()
+          .describe('Optional relationship tags (e.g. ["AGENCY"]).'),
+      },
+      annotations: { ...UPDATE },
+    },
+    async ({ audience_id, ad_account_ids, relationship_type }) => {
+      const id = validateMetaId(audience_id, "audience");
+      const numericAccounts = ad_account_ids.map((a) =>
+        normalizeAccountId(a).slice("act_".length),
+      );
+
+      const body: Record<string, string | number | boolean> = {
+        adaccounts: JSON.stringify(numericAccounts),
+      };
+      if (relationship_type?.length) {
+        body.relationship_type = JSON.stringify(relationship_type);
+      }
+
+      const response = await metaApiClient.postForm<{ success?: boolean }>(
+        `/${id}/adaccounts`,
+        body,
+      );
+
+      if (response?.success !== true) {
+        throw new Error(
+          `Meta did not confirm the share for audience ${id}. Response: ${JSON.stringify(response)}`,
+        );
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Audience ${id} shared with ${numericAccounts.length} account(s): ${numericAccounts.join(", ")}`,
+          },
+        ],
+      };
+    },
+  );
+
+  // ─── Unshare Custom Audience ──────────────────────────────────
+  server.registerTool(
+    "ads_unshare_custom_audience",
+    {
+      description: `${WRITE_WARNING}Revoke a custom audience share from one or more ad accounts. Only removes the share relationship — the audience itself remains on the owner account. Use ads_get_audience_shared_accounts first to confirm which accounts currently have access.`,
+      inputSchema: {
+        audience_id: z.string().describe("Custom audience ID to unshare"),
+        ad_account_ids: z
+          .array(z.string())
+          .min(1)
+          .describe(
+            "Ad account IDs to revoke (numeric or act_<id>).",
+          ),
+      },
+      annotations: { ...UPDATE },
+    },
+    async ({ audience_id, ad_account_ids }) => {
+      const id = validateMetaId(audience_id, "audience");
+      const numericAccounts = ad_account_ids.map((a) =>
+        normalizeAccountId(a).slice("act_".length),
+      );
+
+      const query = new URLSearchParams({
+        adaccounts: JSON.stringify(numericAccounts),
+      }).toString();
+
+      const response = await metaApiClient.delete<{ success?: boolean }>(
+        `/${id}/adaccounts?${query}`,
+      );
+
+      if (response?.success !== true) {
+        throw new Error(
+          `Meta did not confirm the unshare for audience ${id}. Response: ${JSON.stringify(response)}`,
+        );
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Audience ${id} unshared from ${numericAccounts.length} account(s): ${numericAccounts.join(", ")}`,
+          },
+        ],
+      };
+    },
+  );
+
+  // ─── Get Audience Shared Accounts ─────────────────────────────
+  server.registerTool(
+    "ads_get_audience_shared_accounts",
+    {
+      description:
+        "List ad accounts that currently have shared access to a custom audience. Returns each account id + name. Use before ads_share_custom_audience / ads_unshare_custom_audience to audit the share set.",
+      inputSchema: {
+        audience_id: z.string().describe("Custom audience ID"),
+        limit: z.number().min(1).max(100).default(25),
+      },
+      annotations: { ...READ },
+    },
+    async ({ audience_id, limit }) => {
+      const id = validateMetaId(audience_id, "audience");
+
+      const response = await metaApiClient.get<
+        MetaApiResponse<{ account_id: string; id?: string; name?: string }>
+      >(`/${id}/adaccounts`, { fields: "account_id,name", limit });
+
+      const accounts = response.data ?? [];
+      const text =
+        accounts.length === 0
+          ? "No shared accounts."
+          : accounts
+              .map(
+                (a) =>
+                  `• ${a.name ?? "(unnamed)"} (act_${a.account_id})`,
+              )
+              .join("\n");
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Audience ${id} is shared with ${accounts.length} account(s):\n\n${text}`,
+          },
+          { type: "text", text: JSON.stringify(accounts, null, 2) },
         ],
       };
     },

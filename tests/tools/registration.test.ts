@@ -3,12 +3,12 @@ import { registerAllTools } from "../../src/tools/index.js";
 import { createMockMcpServer } from "../setup.js";
 
 describe("registerAllTools", () => {
-  it("registers exactly 93 tools total", () => {
-    // 79 v2 tools renamed (with account_insights removed → 79) + 14 new in v3:
-    //   3 entity helpers + 5 insight views + 3 diagnostics + 1 help + 2 macros
+  it("registers exactly 96 tools total", () => {
+    // 79 v2 tools renamed (with account_insights removed → 79) + 14 new in v3 +
+    //   3 audience-sharing tools (share / unshare / get-shared-accounts).
     const server = createMockMcpServer();
     registerAllTools(server as never);
-    expect(server.registerTool).toHaveBeenCalledTimes(93);
+    expect(server.registerTool).toHaveBeenCalledTimes(96);
   });
 
   it("registers all tools with unique names", () => {
