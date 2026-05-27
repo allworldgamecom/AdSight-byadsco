@@ -47,7 +47,12 @@ tags = ["oauth", "secret"]
 [[rules]]
 id = "oauth-approval-pin"
 description = "MCP OAuth approval PIN (deprecated — should never appear)"
-regex = '''(?i)OAUTH_APPROVAL_PIN\s*[:=]\s*["']?[A-Za-z0-9]{6,}["']?'''
+# Quoted form OR unquoted value terminated by EOL/whitespace/punctuation.
+# The unquoted branch's trailing `[^.A-Za-z0-9_]` rejects identifier
+# references like `OAUTH_APPROVAL_PIN: process.env.X` that would otherwise
+# false-positive on the next identifier characters. RE2 (Go) does not
+# support lookahead, so we use alternation.
+regex = '''(?i)OAUTH_APPROVAL_PIN\s*[:=]\s*(?:["'][A-Za-z0-9]{6,}["']|[A-Za-z0-9]{6,}(?:$|[^.A-Za-z0-9_]))'''
 tags = ["oauth", "secret"]
 
 [[rules]]
@@ -109,6 +114,15 @@ tags = ["key", "pem"]
 
 [allowlist]
 description = "global allowlist for documented examples, lockfiles, and local env"
+# Historical commits with test-only fixture values that pre-date the
+# current fixture conventions (`test-*`, `placeholder`, `fixture`).
+# The current main versions of these test files use allowlisted patterns.
+# DO NOT extend this list to suppress findings in NEW commits — fix the
+# fixture instead.
+commits = [
+  "245fa2cf1aa2aa43f80044ca206888e61e73eaf0",
+  "79c5edcc82f8c5fa79b75d4bf16e6c14c785a0ad",
+]
 paths = [
   '''(^|/)\.env\.example$''',
   '''(^|/)\.env(\..*)?$''',
