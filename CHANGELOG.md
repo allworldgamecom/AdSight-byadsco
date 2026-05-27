@@ -5,6 +5,28 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] — 2026-05-26
+
+Cross-account custom-audience sharing. Meta exposes audience sharing via
+`POST /{audience_id}/adaccounts` but the MCP had no tool for it — agencies
+managing several ad accounts under one Business Manager could create an
+audience but not lend it to a sibling account without leaving the assistant.
+
+### Added
+
+- **`ads_share_custom_audience`** — share a custom audience with one or more
+  ad accounts in the same Business Manager (`POST /{audience_id}/adaccounts`).
+  Accepts numeric or `act_`-prefixed account ids and an optional
+  `relationship_type`. Annotated `UPDATE` (idempotent: re-sharing is a no-op).
+- **`ads_unshare_custom_audience`** — revoke a share from one or more accounts
+  (`DELETE /{audience_id}/adaccounts`). The audience itself is untouched.
+- **`ads_get_audience_shared_accounts`** — list the accounts that currently
+  have shared access to an audience (`GET /{audience_id}/adaccounts`).
+
+Both write tools validate Meta's response and fail loudly when the API does
+not confirm `success: true`, instead of reporting a false positive on any
+2xx body. Tool count: 93 → 96.
+
 ## [3.1.0] — 2026-05-13
 
 Audit-driven fixes for `ads_clone_ad_set_bundle` after Meta API error
