@@ -11,6 +11,7 @@ const CREATE_AUDIENCE_INDEX = 2;
 const SHARE_AUDIENCE_INDEX = 4;
 const UNSHARE_AUDIENCE_INDEX = 5;
 const GET_SHARED_ACCOUNTS_INDEX = 6;
+const DELETE_AUDIENCE_INDEX = 7;
 
 const PIXEL_RULE = JSON.stringify({
   inclusions: {
@@ -379,6 +380,61 @@ describe("registerAudienceTools", () => {
 
       expect(result.content[0].text).toContain("shared with 2 account(s)");
       expect(result.content[0].text).toContain("act_1564852554415330");
+    });
+  });
+
+  describe("ads_delete_custom_audience handler", () => {
+    it("sends DELETE to /{audience_id} and confirms success", async () => {
+      const server = createMockMcpServer();
+      registerAudienceTools(server as never);
+
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse({ success: true })));
+
+      const handler = server._registeredTools[DELETE_AUDIENCE_INDEX].handler;
+      const result = (await handler({
+        audience_id: "9000123",
+      })) as { content: Array<{ type: string; text: string }> };
+
+      const call = vi.mocked(fetch).mock.calls[0];
+      expect(call[1]?.method).toBe("DELETE");
+
+      const url = new URL(call[0] as string);
+      expect(url.pathname).toContain("/9000123");
+      expect(result.content[0].text).toContain("Audience 9000123 deleted successfully");
+    });
+
+    it("throws when Meta returns success=false", async () => {
+      const server = createMockMcpServer();
+      registerAudienceTools(server as never);
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(mockFetchResponse({ success: false })),
+      );
+
+      const handler = server._registeredTools[DELETE_AUDIENCE_INDEX].handler;
+      await expect(
+        handler({
+          audience_id: "9000123",
+        }),
+      ).rejects.toThrow(/did not confirm the deletion/);
+    });
+
+    it("throws when Meta returns a body without success", async () => {
+      const server = createMockMcpServer();
+      registerAudienceTools(server as never);
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(mockFetchResponse({})),
+      );
+
+      const handler = server._registeredTools[DELETE_AUDIENCE_INDEX].handler;
+      await expect(
+        handler({
+          audience_id: "9000123",
+        }),
+      ).rejects.toThrow(/did not confirm the deletion/);
     });
   });
 });
