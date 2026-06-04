@@ -5,7 +5,25 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.2.0] — 2026-05-26
+## [3.2.1] — 2026-06-04
+
+Documentation and validation hardening. No new tools — tool count stays at 96.
+
+### Fixed
+
+- **`ads_delete_custom_audience`** now validates Meta's response and throws
+  when the API does not confirm `success: true`, instead of reporting a
+  false positive on any 2xx body. Brings it in line with the
+  `ads_share_custom_audience` / `ads_unshare_custom_audience` write tools
+  added in 3.2.0.
+- **Docs**: README tool count corrected from `93` to `96` (TOC, comparison
+  table, features list, and the `Tools` section heading) to match the actual
+  registered tool count and the 3.2.0 CHANGELOG.
+
+### Changed
+
+- **Dev dependencies**: lockfile refreshed (vitest/vite toolchain moved from
+  `rollup` to `rolldown` bindings). No runtime/production dependency changes.
 
 Cross-account custom-audience sharing. Meta exposes audience sharing via
 `POST /{audience_id}/adaccounts` but the MCP had no tool for it — agencies

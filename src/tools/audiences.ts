@@ -358,7 +358,13 @@ export function registerAudienceTools(server: McpServer): void {
     },
     async ({ audience_id }) => {
       const id = validateMetaId(audience_id, "audience");
-      await metaApiClient.delete<{ success: boolean }>(`/${id}`);
+      const response = await metaApiClient.delete<{ success?: boolean }>(`/${id}`);
+
+      if (response?.success !== true) {
+        throw new Error(
+          `Meta did not confirm the deletion for audience ${id}. Response: ${JSON.stringify(response)}`,
+        );
+      }
 
       return {
         content: [
