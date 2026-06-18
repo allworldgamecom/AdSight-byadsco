@@ -688,7 +688,11 @@ export async function startHttpTransport(
   if (isApiKeyConfigured()) authModes.push("API Key");
   authModes.push(config.multiTenantEnabled ? "Meta OAuth" : "OAuth 2.1");
 
-  app.listen(port, () => {
+  // AdSight hardening (FU1): bind loopback ONLY, by construction. This is a money-path MCP
+  // (Meta WRITE token in env) and must never answer off-box. No env override on purpose — an
+  // override would be a re-exposure footgun (council 2/2 BLOCK). Client url is the IPv4 literal
+  // http://127.0.0.1:3210/mcp; IPv4-only bind is intentional (smaller surface, ::1 unused).
+  app.listen(port, "127.0.0.1", () => {
     logger.info(
       {
         port,
