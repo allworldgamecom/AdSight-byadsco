@@ -76,6 +76,7 @@ export interface GatewayClientConfig {
 // независимо реджектит money на /v1/meta. Список намеренно ШИРЕ (over-route в money безопаснее).
 const MONEY_KEY_SUFFIXES = [
   "budget",
+  "budget_cents",
   "bid",
   "bid_amount",
   "spend_cap",
@@ -83,6 +84,20 @@ const MONEY_KEY_SUFFIXES = [
   "lifetime_budget",
   "bid_constraints",
 ];
+// AUDIT-3 C5: control-ключи, ломающие path-изоляцию (Graph исполняет глобально). Зеркало gateway.
+const CONTROL_KEYS = new Set(["batch", "ids", "include_headers", "asset_feed_spec_overrides"]);
+// AUDIT-3 C4: structured-поля, которые Meta принимает как вложенный JSON (строкой/dict). Зеркало gateway.
+const STRUCTURED_JSON_FIELDS = new Set([
+  "object_story_spec",
+  "asset_feed_spec",
+  "promoted_object",
+  "targeting",
+  "bid_info",
+  "degrees_of_freedom_spec",
+  "link_data",
+]);
+// AUDIT-3: активационные статусы = начало траты (зеркало gateway: ACTIVE + UNPAUSED).
+const ACTIVE_STATUSES = new Set(["ACTIVE", "UNPAUSED"]);
 const MONEY_KEYS = new Set([
   "budget",
   "daily_budget",
@@ -116,13 +131,36 @@ function isMoneyKey(k: string): boolean {
   return kl.includes("spend_cap") || kl.endsWith("_bid") || kl.endsWith("_budget");
 }
 
-function hasMoneyField(fields: RawFields): boolean {
-  for (const [k, v] of Object.entries(fields)) {
-    if (isMoneyKey(k)) return true;
-    // status=ACTIVE = активация = начало траты
-    if (k.toLowerCase() === "status" && String(v).toUpperCase() === "ACTIVE") {
-      return true;
+/** Нормализованная проверка активационного статуса: trim+upper (AUDIT-3 whitespace-bypass). */
+function isActiveStatus(v: unknown): boolean {
+  return ACTIVE_STATUSES.has(String(v).trim().toUpperCase());
+}
+
+// AUDIT-3 MAJOR-A: РЕКУРСИВНЫЙ money-классификатор, зеркалит gateway _has_money_field
+// (path2b/gateway/backends.py:332-356). Цель — выбор эндпоинта; даже при ошибке gateway
+// независимо реджектит money на /v1/meta. fail-CLOSED: нераспарсенный structured-blob → money.
+function hasMoneyField(fields: unknown): boolean {
+  if (fields !== null && typeof fields === "object" && !Array.isArray(fields)) {
+    for (const [k, v0] of Object.entries(fields as RawFields)) {
+      const kl = k.toLowerCase();
+      if (CONTROL_KEYS.has(kl)) return true; // C5
+      if (isMoneyKey(kl)) return true; // C3
+      if (kl === "status" && isActiveStatus(v0)) return true; // активация (trim+ACTIVE/UNPAUSED)
+      let v: unknown = v0;
+      // C4: structured-поле строкой → парсим; не распарсилось → fail-closed (money).
+      if (typeof v === "string" && STRUCTURED_JSON_FIELDS.has(kl)) {
+        try {
+          v = JSON.parse(v);
+        } catch {
+          return true;
+        }
+      }
+      if (hasMoneyField(v)) return true; // рекурсия в dict/list
     }
+    return false;
+  }
+  if (Array.isArray(fields)) {
+    return fields.some((x) => hasMoneyField(x));
   }
   return false;
 }
@@ -147,15 +185,45 @@ function firstSeg(path: string): string {
   return clean.split("/")[0] ?? clean;
 }
 
+// AUDIT-3 MAJOR-C: МАКСИМУМ по всем присутствующим budget-ключам (не первый-match).
+// costCents — лишь подсказка; авторитетный резерв считает gateway. Но не занижаем хинт.
 function budgetCents(fields: RawFields): number {
-  for (const key of ["daily_budget", "lifetime_budget", "budget", "spend_cap"]) {
+  let max = 0;
+  for (const key of [
+    "daily_budget",
+    "daily_budget_cents",
+    "lifetime_budget",
+    "lifetime_budget_cents",
+    "budget",
+    "budget_cents",
+    "spend_cap",
+    "spend_cap_cents",
+  ]) {
     const v = fields[key];
     if (v !== undefined && v !== null) {
       const n = Number(v);
-      if (Number.isFinite(n) && n > 0) return Math.round(n);
+      if (Number.isFinite(n) && n > max) max = n;
     }
   }
-  return 0;
+  return Math.round(max);
+}
+
+// AUDIT-3 MAJOR-E: gateway publish_campaign/publish_adset/activate_* резервируют по
+// daily_budget_cents/dailyBudgetCents (server.py:_reserve_cents), но byadsco-тулы шлют
+// daily_budget (string-cents). Добавляем алиас *_cents в body, чтобы gateway-резерв нашёл
+// сумму и не вернул _RESERVE_DENY(402). Аддитивно: исходные ключи остаются для backend.
+function withReserveAliases(fields: RawFields): RawFields {
+  const out: RawFields = { ...fields };
+  const aliasOf = (src: string, dst: string) => {
+    if (out[dst] === undefined && out[src] !== undefined && out[src] !== null) {
+      const n = Number(out[src]);
+      if (Number.isFinite(n)) out[dst] = Math.round(n);
+    }
+  };
+  aliasOf("daily_budget", "daily_budget_cents");
+  aliasOf("lifetime_budget", "lifetime_budget_cents");
+  aliasOf("spend_cap", "spend_cap_cents");
+  return out;
 }
 
 /**
@@ -173,7 +241,10 @@ export function mapMoneyAction(
 ): ActRequest | null {
   const m = method.toUpperCase();
   const p = path.startsWith("/") ? path : `/${path}`;
-  const status = String(fields.status ?? "").toUpperCase();
+  // AUDIT-3: trim+upper для статуса (whitespace-bypass " ACTIVE " → ACTIVE).
+  const status = String(fields.status ?? "").trim().toUpperCase();
+  // AUDIT-3 MAJOR-E: body с алиасами *_cents для gateway-резерва (publish/activate/scale).
+  const body = withReserveAliases(fields);
 
   // DELETE на узле — destructive money-объект (campaign/adset/ad). gateway v1 знает только pause_*.
   // delete_* НЕ в _KNOWN_ACTIONS → не маппим (pause предпочтительнее). Вернём null → DENY.
@@ -183,9 +254,9 @@ export function mapMoneyAction(
   if (RE_ACCT.test(p)) {
     const coll = p.match(RE_ACCT)![1];
     if (coll === "campaigns")
-      return { action: "publish_campaign", target: firstSeg(p), costCents: budgetCents(fields), body: fields };
+      return { action: "publish_campaign", target: firstSeg(p), costCents: budgetCents(fields), body };
     if (coll === "adsets")
-      return { action: "publish_adset", target: firstSeg(p), costCents: budgetCents(fields), body: fields };
+      return { action: "publish_adset", target: firstSeg(p), costCents: budgetCents(fields), body };
     if (coll === "ads")
       // создание ad: money если внутри платящего adset. gateway не имеет publish_ad money-резерва
       // в v1 _KNOWN_ACTIONS (нет publish_ad) → null → DENY (создаётся через verified-flow, отд. PR).
@@ -194,7 +265,7 @@ export function mapMoneyAction(
 
   // POST /act_X {spend_cap} → set_spend_cap
   if (RE_ACCT_ROOT.test(p) && fields.spend_cap !== undefined) {
-    return { action: "set_spend_cap", target: firstSeg(p), costCents: budgetCents(fields), body: fields };
+    return { action: "set_spend_cap", target: firstSeg(p), costCents: budgetCents(fields), body };
   }
 
   // POST /{id} с money-полем/ACTIVE → update/scale/activate/pause по содержимому
@@ -202,14 +273,14 @@ export function mapMoneyAction(
     const id = firstSeg(p);
     // pause: status=PAUSED — НЕ money (останавливает трату), но идёт типизированно для аудита.
     if (status === "PAUSED") {
-      // pause_campaign/adset/ad — тип объекта неизвестен из id. gateway различает по payload-ключу
-      // (campaign_id/adset_id/ad_id). Шлём pause_campaign с campaign_id; gateway pause_* ждут
-      // конкретный *_id. Безопасный дефолт: положим id во ВСЕ три ключа — gateway возьмёт нужный.
+      // pause_campaign/adset/ad — тип объекта неизвестен из id (opaque node-id).
+      // Дефолт pause_campaign с campaign_id=id. pause обратим и НЕ тратит → spend-safe независимо
+      // от типа. v2: прокидывать тип объекта от caller → pause_adset/pause_ad. (кладём ТОЛЬКО campaign_id.)
       return {
         action: "pause_campaign",
         target: id,
         costCents: 0,
-        body: { ...fields, campaign_id: id },
+        body: { ...body, campaign_id: id },
       };
     }
     if (status === "ACTIVE") {
@@ -219,18 +290,18 @@ export function mapMoneyAction(
         action: "activate_campaign",
         target: id,
         costCents: budgetCents(fields),
-        body: { ...fields, campaign_id: id },
+        body: { ...body, campaign_id: id },
       };
     }
     // budget-update без status → scale. gateway: scale_budget(campaign)/scale_adset_budget(adset).
     if (hasMoneyField(fields)) {
-      // тип объекта неизвестен — дефолт scale_budget(campaign). Если это adset, gateway scale_budget
-      // ждёт campaign_id и применит daily_budget на узел id. Кладём id в campaign_id.
+      // тип объекта неизвестен — дефолт scale_budget(campaign). gateway scale_budget ждёт
+      // campaign_id и применит daily_budget на узел id. (кладём ТОЛЬКО campaign_id; v2: тип от caller.)
       return {
         action: "scale_budget",
         target: id,
         costCents: budgetCents(fields),
-        body: { ...fields, campaign_id: id },
+        body: { ...body, campaign_id: id },
       };
     }
   }
@@ -246,7 +317,7 @@ export class GatewayWriteClient {
   private readonly timeoutMs: number;
 
   constructor(cfg: GatewayClientConfig) {
-    this.url = cfg.url.replace(/\/+$/, "");
+    this.url = validateGatewayUrl(cfg.url);
     this.apiKey = cfg.apiKey;
     this.session = cfg.session;
     this.timeoutMs = cfg.timeoutMs ?? 30000;
@@ -332,8 +403,46 @@ export class GatewayWriteClient {
 // ── singleton-фабрика (mirrors metaApiClient pattern) ────────────────────
 let _gwClient: GatewayWriteClient | null = null;
 
+// AUDIT-3 MINOR-1: ADSIGHT_GW_URL валидация — только loopback http ИЛИ https; никакого
+// query/fragment/userinfo (иначе плохой env может утечь X-AdSight-Key на чужой хост).
+export function validateGatewayUrl(raw: string): string {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error(`ADSIGHT_GW_URL не URL: ${raw}`);
+  }
+  if (u.username || u.password) {
+    throw new Error("ADSIGHT_GW_URL не должен содержать userinfo (user:pass@).");
+  }
+  if (u.search || u.hash) {
+    throw new Error("ADSIGHT_GW_URL не должен содержать query/fragment.");
+  }
+  const isLoopback = u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "[::1]";
+  if (u.protocol === "http:") {
+    if (!isLoopback) {
+      throw new Error(`ADSIGHT_GW_URL http:// разрешён ТОЛЬКО на loopback, не ${u.hostname}.`);
+    }
+  } else if (u.protocol !== "https:") {
+    throw new Error(`ADSIGHT_GW_URL: недопустимый протокол ${u.protocol} (только http loopback / https).`);
+  }
+  return raw.replace(/\/+$/, "");
+}
+
+// AUDIT-3 MAJOR-B: fail-CLOSED парсинг режима. trim, строгий enum, throw на неизвестном
+// непустом значении (иначе "token-free " тихо → direct Graph = token-leak risk).
+function parseGwMode(): "direct" | "token-free" {
+  const raw = process.env.ADSIGHT_GW_MODE;
+  if (raw === undefined || raw === "") return "direct";
+  const mode = raw.trim().toLowerCase();
+  if (mode === "direct" || mode === "token-free") return mode;
+  throw new Error(
+    `ADSIGHT_GW_MODE='${raw}' недопустим: только 'direct' или 'token-free' (fail-closed).`,
+  );
+}
+
 export function isTokenFreeMode(): boolean {
-  return (process.env.ADSIGHT_GW_MODE ?? "direct").toLowerCase() === "token-free";
+  return parseGwMode() === "token-free";
 }
 
 export function getGatewayWriteClient(): GatewayWriteClient {

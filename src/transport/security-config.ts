@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger.js";
+import { isTokenFreeMode } from "../meta/gateway-client.js";
 
 export interface SecurityConfig {
   metaAppConfigured: boolean;
@@ -84,7 +85,17 @@ export function resolveSecurityConfig(
   const oauthSecret = readEnvVar(env, "OAUTH_SECRET");
 
   const allowlistConfigured = hasAllowlist(env);
-  const multiTenantEnabled = metaAppConfigured;
+  // AUDIT-3 MAJOR-D (belt-and-suspenders для INV-A): в token-free byadsco НЕ держит токен,
+  // значит multi-tenant HTTP auth-routes (/auth/register-system-token и т.п.) НЕ должны
+  // монтироваться — иначе можно вновь зарегистрировать Meta-токен. Дурабельный носитель
+  // INV-A — инфра (#8 token off-box + #9 nftables); это кодовая страховка.
+  const tokenFree = isTokenFreeMode();
+  if (tokenFree && metaAppConfigured) {
+    logger.warn(
+      "token-free режим: META_APP_ID/SECRET игнорируются, multi-tenant auth-routes НЕ монтируются (INV-A).",
+    );
+  }
+  const multiTenantEnabled = metaAppConfigured && !tokenFree;
 
   if (multiTenantEnabled) {
     if (!tokenEncryptionKey) {
