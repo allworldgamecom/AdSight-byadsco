@@ -13,6 +13,7 @@ import { requestContext } from "../auth/token-store.js";
 import { tokenManager } from "../auth/token-manager.js";
 import { configureSessionJtiStore, getSession } from "../auth/session.js";
 import { resolveSecurityConfig } from "./security-config.js";
+import { isTokenFreeMode } from "../meta/gateway-client.js";
 import { mountAuthRoutes, safeReturnTo } from "./auth-routes.js";
 import { validateAuthorizeQuery } from "./authorize-validation.js";
 import {
@@ -347,6 +348,16 @@ function buildMetaTokenMiddleware(
   multiTenantEnabled: boolean,
 ): express.RequestHandler {
   return async (req, res, next) => {
+    // Path 2B token-free (INV-A): byadsco НЕ держит и НЕ резолвит Meta-токен.
+    // Write идёт в gateway (X-AdSight-Key), read fail-loud (hashcott). Пропускаем
+    // запрос БЕЗ accessToken — token-free ветки client.ts сами маршрутизируют.
+    // ВАЖНО: обход ПЕРВЫМ, ДО x-meta-token, иначе можно было бы пробросить токен
+    // и обойти gateway (нарушение INV-A: никакого Meta-токена в byadsco-процессе).
+    if (isTokenFreeMode()) {
+      next();
+      return;
+    }
+
     const headerToken = req.headers["x-meta-token"];
     if (typeof headerToken === "string" && headerToken) {
       requestContext.run({ accessToken: headerToken }, () => next());
