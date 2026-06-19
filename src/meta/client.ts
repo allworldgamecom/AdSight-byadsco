@@ -1,5 +1,11 @@
 import { getAccessToken, hashToken } from "../auth/token-store.js";
 import { logger } from "../utils/logger.js";
+import {
+  isTokenFreeMode,
+  getGatewayWriteClient,
+  ReadDisabledError,
+  MediaUploadNotRoutedError,
+} from "./gateway-client.js";
 import { RateLimiter, type RequestContext } from "./rate-limiter.js";
 import { CircuitBreaker, type CircuitContext } from "./circuit-breaker.js";
 import { WritePacer } from "./write-pacer.js";
@@ -68,6 +74,10 @@ export class MetaApiClient {
     path: string,
     params?: Record<string, string | number | boolean | undefined>,
   ): Promise<T> {
+    // Path 2B token-free: прямой Graph-read запрещён (read=hashcott). Fail-loud.
+    if (isTokenFreeMode()) {
+      throw new ReadDisabledError(path);
+    }
     const url = this.buildUrl(path, params);
     return this.execute<T>("GET", url, path);
   }
@@ -76,6 +86,10 @@ export class MetaApiClient {
     path: string,
     body?: Record<string, unknown>,
   ): Promise<T> {
+    // Path 2B token-free: write → gateway (raw fields ещё структурированы здесь).
+    if (isTokenFreeMode()) {
+      return getGatewayWriteClient().route<T>("POST", path, body ?? {});
+    }
     const url = this.buildUrl(path);
     return this.execute<T>("POST", url, path, {
       headers: { "Content-Type": "application/json" },
@@ -88,6 +102,10 @@ export class MetaApiClient {
     params: Record<string, string | number | boolean>,
     scope?: RequestScope,
   ): Promise<T> {
+    // Path 2B token-free: write → gateway (без сериализации, gateway держит токен).
+    if (isTokenFreeMode()) {
+      return getGatewayWriteClient().route<T>("POST", path, params);
+    }
     const url = this.buildUrl(path);
     const formBody = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
@@ -103,6 +121,11 @@ export class MetaApiClient {
     path: string,
     formData: FormData,
   ): Promise<T> {
+    // Path 2B token-free: media-upload (binary multipart) не маршрутизируется в v1.
+    // Прямой вызов невозможен (токена нет) → честный явный отказ. Бинарный passthrough = v2.
+    if (isTokenFreeMode()) {
+      throw new MediaUploadNotRoutedError(path);
+    }
     const url = this.buildUrl(path);
     const token = getAccessToken();
     formData.set("access_token", token);
@@ -110,6 +133,11 @@ export class MetaApiClient {
   }
 
   async delete<T>(path: string): Promise<T> {
+    // Path 2B token-free: DELETE → gateway (money-router вернёт unmappedMoney для
+    // destructive узлов; gateway v1 знает pause_*, не delete_*).
+    if (isTokenFreeMode()) {
+      return getGatewayWriteClient().route<T>("DELETE", path, {});
+    }
     const url = this.buildUrl(path);
     return this.execute<T>("DELETE", url, path);
   }
