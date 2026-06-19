@@ -13,6 +13,7 @@ import { requestContext } from "../auth/token-store.js";
 import { tokenManager } from "../auth/token-manager.js";
 import { configureSessionJtiStore, getSession } from "../auth/session.js";
 import { resolveSecurityConfig } from "./security-config.js";
+import { isTokenFreeMode } from "../meta/gateway-client.js";
 import { mountAuthRoutes, safeReturnTo } from "./auth-routes.js";
 import { validateAuthorizeQuery } from "./authorize-validation.js";
 import {
@@ -347,6 +348,16 @@ function buildMetaTokenMiddleware(
   multiTenantEnabled: boolean,
 ): express.RequestHandler {
   return async (req, res, next) => {
+    // Path 2B token-free (INV-A): byadsco НЕ держит и НЕ резолвит Meta-токен.
+    // Write идёт в gateway (X-AdSight-Key), read fail-loud (hashcott). Пропускаем
+    // запрос БЕЗ accessToken — token-free ветки client.ts сами маршрутизируют.
+    // ВАЖНО: обход ПЕРВЫМ, ДО x-meta-token, иначе можно было бы пробросить токен
+    // и обойти gateway (нарушение INV-A: никакого Meta-токена в byadsco-процессе).
+    if (isTokenFreeMode()) {
+      next();
+      return;
+    }
+
     const headerToken = req.headers["x-meta-token"];
     if (typeof headerToken === "string" && headerToken) {
       requestContext.run({ accessToken: headerToken }, () => next());
@@ -421,6 +432,23 @@ export async function startHttpTransport(
   createServer: () => McpServer,
   port: number,
 ): Promise<void> {
+  // INV-A fail-closed (red-team FINDING-6/-3): in token-free mode the byadsco
+  // process MUST NOT hold a Meta token in env. parseGwMode() is eager-validated
+  // here so a bad ADSIGHT_GW_MODE crashes at start, not on first request
+  // (FINDING-7). If token-free AND a Meta token is still present in env, refuse
+  // to start — enforces the off-box invariant as code, not operator intent.
+  if (isTokenFreeMode()) {
+    const leaked = ["META_ACCESS_TOKEN", "META_TOKENS"].filter(
+      (k) => (process.env[k]?.trim() ?? "") !== "",
+    );
+    if (leaked.length > 0) {
+      throw new Error(
+        `INV-A violation: token-free mode but env still holds [${leaked.join(", ")}]. ` +
+          `Remove these from .env.byadsco — byadsco must be token-off-box.`,
+      );
+    }
+  }
+
   const app = express();
   const isProduction = process.env.NODE_ENV === "production";
   const config = resolveSecurityConfig();
@@ -688,7 +716,11 @@ export async function startHttpTransport(
   if (isApiKeyConfigured()) authModes.push("API Key");
   authModes.push(config.multiTenantEnabled ? "Meta OAuth" : "OAuth 2.1");
 
-  app.listen(port, () => {
+  // AdSight hardening (FU1): bind loopback ONLY, by construction. This is a money-path MCP
+  // (Meta WRITE token in env) and must never answer off-box. No env override on purpose — an
+  // override would be a re-exposure footgun (council 2/2 BLOCK). Client url is the IPv4 literal
+  // http://127.0.0.1:3210/mcp; IPv4-only bind is intentional (smaller surface, ::1 unused).
+  app.listen(port, "127.0.0.1", () => {
     logger.info(
       {
         port,

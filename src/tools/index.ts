@@ -24,6 +24,8 @@ import { registerEntityTools } from "./entities.js";
 import { registerDiagnosticTools } from "./diagnostics.js";
 import { registerHelpTools } from "./help.js";
 import { registerMacroTools } from "./macros.js";
+import { isTokenFreeMode } from "../meta/gateway-client.js";
+import { logger } from "../utils/logger.js";
 
 /**
  * Register all Meta Ads tools on the MCP server.
@@ -70,7 +72,13 @@ export function registerAllTools(server: McpServer): void {
   registerInstagramTools(server);    // 2 tools — IG account & media lookup
 
   // ─── Token Management ────────────────────────────────────
-  registerTokenTools(server);        // 4 tools — list / set-active / register / delete
+  // Path 2B token-free (INV-A): token-management tools ОТКЛЮЧЕНЫ — иначе byadsco
+  // сможет снова добыть/активировать токен в обход gateway. Токен живёт только off-box.
+  if (isTokenFreeMode()) {
+    logger.info("Path 2B token-free: token-management tools отключены (INV-A)");
+  } else {
+    registerTokenTools(server);        // 4 tools — list / set-active / register / delete
+  }
 
   // Total: 96 tools (79 renamed + 14 new in v3 + 3 audience-sharing)
 }

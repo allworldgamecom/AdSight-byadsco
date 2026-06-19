@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchPrimaryBusiness } from "../../src/auth/meta-oauth.js";
+import {
+  fetchPrimaryBusiness,
+  fetchProfile,
+  validateToken,
+} from "../../src/auth/meta-oauth.js";
 import { mockFetchResponse } from "../setup.js";
 
 describe("fetchPrimaryBusiness", () => {
@@ -68,5 +72,38 @@ describe("fetchPrimaryBusiness", () => {
 
     const result = await fetchPrimaryBusiness("token-x");
     expect(result).toEqual({ id: "9999", name: null });
+  });
+});
+
+// INV-A: direct Graph fetches in meta-oauth must refuse in token-free mode
+// (red-team FINDING-1/-9). Guard runs before any fetch().
+describe("meta-oauth token-free guard (INV-A)", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch");
+    process.env.ADSIGHT_GW_MODE = "token-free";
+  });
+
+  afterEach(() => {
+    delete process.env.ADSIGHT_GW_MODE;
+    vi.restoreAllMocks();
+  });
+
+  it("fetchProfile throws and never calls fetch in token-free", async () => {
+    await expect(fetchProfile("any-token")).rejects.toThrow(/token-free.*INV-A/);
+    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+  });
+
+  it("fetchPrimaryBusiness throws and never calls fetch in token-free", async () => {
+    await expect(fetchPrimaryBusiness("any-token")).rejects.toThrow(
+      /token-free.*INV-A/,
+    );
+    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+  });
+
+  it("validateToken reports invalid (guard surfaces via fetchProfile) without hitting Graph", async () => {
+    const result = await validateToken("any-token");
+    expect(result.valid).toBe(false);
+    expect(result.error).toMatch(/token-free.*INV-A/);
+    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
   });
 });
