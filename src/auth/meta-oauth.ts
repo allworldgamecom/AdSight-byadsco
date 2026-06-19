@@ -1,8 +1,21 @@
 import { logger } from "../utils/logger.js";
+import { isTokenFreeMode } from "../meta/gateway-client.js";
 
 const META_API_VERSION = process.env.META_API_VERSION ?? "v22.0";
 const META_GRAPH = "https://graph.facebook.com";
 const META_OAUTH_DIALOG = "https://www.facebook.com";
+
+// INV-A defense-in-depth (red-team FINDING-1/-9): every direct graph.facebook.com
+// fetch in this module must refuse to run in token-free mode. The auth-routes that
+// call these are already unmounted in token-free (multiTenantEnabled=false), so this
+// is a second, fail-closed layer that does not rely on conditional route mounting.
+function assertNotTokenFree(fn: string): void {
+  if (isTokenFreeMode()) {
+    throw new Error(
+      `${fn}: direct Graph call forbidden in token-free mode (INV-A). Writes route via gateway; reads via hashcott.`,
+    );
+  }
+}
 
 const DEFAULT_SCOPES = [
   "ads_management",
@@ -61,6 +74,7 @@ export async function exchangeCodeForToken(
   config: MetaOAuthConfig,
   code: string,
 ): Promise<ShortLivedToken> {
+  assertNotTokenFree("exchangeCodeForToken");
   const url = new URL(`/${config.apiVersion}/oauth/access_token`, META_GRAPH);
   url.searchParams.set("client_id", config.appId);
   url.searchParams.set("client_secret", config.appSecret);
@@ -93,6 +107,7 @@ export async function exchangeForLongLivedToken(
   config: MetaOAuthConfig,
   shortLivedToken: string,
 ): Promise<LongLivedToken> {
+  assertNotTokenFree("exchangeForLongLivedToken");
   const url = new URL(`/${config.apiVersion}/oauth/access_token`, META_GRAPH);
   url.searchParams.set("grant_type", "fb_exchange_token");
   url.searchParams.set("client_id", config.appId);
@@ -131,6 +146,7 @@ export async function fetchProfile(
   accessToken: string,
   apiVersion: string = META_API_VERSION,
 ): Promise<MetaProfile> {
+  assertNotTokenFree("fetchProfile");
   const url = new URL(`/${apiVersion}/me`, META_GRAPH);
   url.searchParams.set(
     "fields",
@@ -189,6 +205,7 @@ export async function fetchPrimaryBusiness(
   accessToken: string,
   apiVersion: string = META_API_VERSION,
 ): Promise<MetaBusiness | null> {
+  assertNotTokenFree("fetchPrimaryBusiness");
   const url = new URL(`/${apiVersion}/me/businesses`, META_GRAPH);
   url.searchParams.set("fields", "id,name");
   url.searchParams.set("limit", "1");

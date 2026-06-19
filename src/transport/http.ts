@@ -432,6 +432,23 @@ export async function startHttpTransport(
   createServer: () => McpServer,
   port: number,
 ): Promise<void> {
+  // INV-A fail-closed (red-team FINDING-6/-3): in token-free mode the byadsco
+  // process MUST NOT hold a Meta token in env. parseGwMode() is eager-validated
+  // here so a bad ADSIGHT_GW_MODE crashes at start, not on first request
+  // (FINDING-7). If token-free AND a Meta token is still present in env, refuse
+  // to start — enforces the off-box invariant as code, not operator intent.
+  if (isTokenFreeMode()) {
+    const leaked = ["META_ACCESS_TOKEN", "META_TOKENS"].filter(
+      (k) => (process.env[k]?.trim() ?? "") !== "",
+    );
+    if (leaked.length > 0) {
+      throw new Error(
+        `INV-A violation: token-free mode but env still holds [${leaked.join(", ")}]. ` +
+          `Remove these from .env.byadsco — byadsco must be token-off-box.`,
+      );
+    }
+  }
+
   const app = express();
   const isProduction = process.env.NODE_ENV === "production";
   const config = resolveSecurityConfig();
